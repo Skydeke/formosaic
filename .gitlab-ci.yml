@@ -42,8 +42,8 @@ android_apk:
   artifacts:
     name: "android-apks"
     paths:
-      - target/debug/apk/*.apk
-      - target/release/apk/*.apk
+    - target/debug/apk/**/*.apk
+    - target/release/apk/**/*.apk
     expire_in: 1 week
   only:
     - branches
