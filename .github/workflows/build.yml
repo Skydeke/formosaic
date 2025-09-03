@@ -1,0 +1,97 @@
+name: Build Formosaic (Linux + Android)
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ "v*", "release-*" ]
+  pull_request:
+
+jobs:
+  linux-release:
+    name: Linux desktop (release build-only)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-${{ runner.os }}-
+
+      - name: Build Linux release (no run)
+        run: make linux-build-release
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-desktop-release
+          path: target/release/examples/desktop
+
+  android-apk:
+    name: Android APKs (debug & release)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Set up Java (for Android build tools)
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: cargo-android-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            cargo-android-${{ runner.os }}-
+
+      - name: Cache local Android SDK/NDK
+        uses: actions/cache@v4
+        with:
+          path: .android/sdk
+          key: android-sdk-${{ runner.os }}-33-25.2.9519653
+          restore-keys: |
+            android-sdk-${{ runner.os }}-
+
+      - name: Set up Android SDK/NDK & cargo-apk
+        run: make setup-android
+
+      - name: Restore release keystore
+        run: |
+          echo "$ANDROID_KEYSTORE_B64" | base64 -d > release.keystore
+
+      - name: Build APK (debug)
+        run: make android-apk
+
+      - name: Build APK (release)
+        run: make android-apk-release
+
+      - name: Upload APKs (debug)
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-debug
+          path: target/debug/apk/*.apk
+
+      - name: Upload APKs (release)
+        uses: actions/upload-artifact@v4
+        with:
+          name: apk-release
+          path: target/release/apk/*.apk
+

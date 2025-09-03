@@ -1,0 +1,51 @@
+stages:
+  - build_linux
+  - build_android
+
+variables:
+  CARGO_TERM_COLOR: always
+
+cache:
+  paths:
+    - target/
+    - .cargo/registry/
+    - .cargo/git/
+    - .android/sdk/
+
+linux_release:
+  stage: build_linux
+  image: rust:latest
+  script:
+    - apt-get update && apt-get install -y --no-install-recommends ca-certificates
+    - make linux-build-release
+  artifacts:
+    name: "linux-desktop-release"
+    paths:
+      - target/release/examples/desktop
+    expire_in: 1 week
+  only:
+    - branches
+    - tags
+    - merge_requests
+
+android_apk:
+  stage: build_android
+  image: rust:latest
+  before_script:
+    - apt-get update && apt-get install -y --no-install-recommends curl unzip openjdk-17-jdk-headless ca-certificates
+  script:
+    - make setup-android
+    - echo "$ANDROID_KEYSTORE_B64" | base64 -d > release.keystore
+    - make android-apk
+    - make android-apk-release
+  artifacts:
+    name: "android-apks"
+    paths:
+      - target/debug/apk/*.apk
+      - target/release/apk/*.apk
+    expire_in: 1 week
+  only:
+    - branches
+    - tags
+    - merge_requests
+

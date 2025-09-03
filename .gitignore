@@ -5,3 +5,4 @@
 /target
 
 .android
+release.keystore

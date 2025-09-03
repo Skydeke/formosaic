@@ -65,6 +65,12 @@ name = "android.permission.WRITE_EXTERNAL_STORAGE"
 #name = "org.libsdl.app.SDLActivity"
 label = "Formosaic"
 
+[package.metadata.android.signing.release]
+path = "release.keystore"
+keystore_password = "danjklk98234o23penmp09kasdpldas%&()Q"
+key_alias = "formosaic"
+key_password = "danjklk98234o23penmp09kasdpldas%&()Q"
+
 [build-dependencies]
 gl_generator = "0.14"
 cfg_aliases = "0.2.1"
