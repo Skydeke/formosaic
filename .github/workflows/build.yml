@@ -42,14 +42,14 @@ jobs:
         run: make setup-android
 
       - name: Restore release keystore
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
         run: echo "$ANDROID_KEYSTORE_B64" | base64 -d > release.keystore
 
       - name: Build APK (debug)
         run: make android-apk
 
       - name: Build APK (release)
-        env:
-          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
         run: make android-apk-release
 
       - name: Upload APKs
