@@ -4,13 +4,6 @@ stages:
 variables:
   CARGO_TERM_COLOR: always
 
-cache:
-  paths:
-    - target/
-    - .cargo/registry/
-    - .cargo/git/
-    - .android/sdk/
-
 linux_release:
   stage: build
   image: rust:latest

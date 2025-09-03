@@ -16,17 +16,6 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Cache Cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: cargo-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            cargo-${{ runner.os }}-
-
       - name: Build Linux release (no run)
         run: make linux-build-release
 
@@ -48,27 +37,6 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends curl unzip openjdk-21-jdk-headless ca-certificates pkg-config libssl-dev
-          export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
-          export PATH="$JAVA_HOME/bin:$PATH"
-
-      - name: Cache Cargo
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cargo/registry
-            ~/.cargo/git
-            target
-          key: cargo-android-${{ runner.os }}-${{ hashFiles('**/Cargo.lock') }}
-          restore-keys: |
-            cargo-android-${{ runner.os }}-
-
-      - name: Cache local Android SDK/NDK
-        uses: actions/cache@v4
-        with:
-          path: .android/sdk
-          key: android-sdk-${{ runner.os }}-33-25.2.9519653
-          restore-keys: |
-            android-sdk-${{ runner.os }}-
 
       - name: Set up Android SDK/NDK & cargo-apk
         run: make setup-android
@@ -81,9 +49,7 @@ jobs:
 
       - name: Build APK (release)
         env:
-          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
         run: make android-apk-release
 
       - name: Upload APKs
