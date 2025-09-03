@@ -1,6 +1,5 @@
 stages:
-  - build_linux
-  - build_android
+  - build
 
 variables:
   CARGO_TERM_COLOR: always
@@ -13,7 +12,7 @@ cache:
     - .android/sdk/
 
 linux_release:
-  stage: build_linux
+  stage: build
   image: rust:latest
   script:
     - apt-get update && apt-get install -y --no-install-recommends ca-certificates
@@ -29,7 +28,7 @@ linux_release:
     - merge_requests
 
 android_apk:
-  stage: build_android
+  stage: build
   image: rust:latest
   before_script:
     - apt-get update

@@ -48,6 +48,8 @@ jobs:
         run: |
           apt-get update
           apt-get install -y --no-install-recommends curl unzip openjdk-21-jdk-headless ca-certificates pkg-config libssl-dev
+          export JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64
+          export PATH="$JAVA_HOME/bin:$PATH"
 
       - name: Cache Cargo
         uses: actions/cache@v4
