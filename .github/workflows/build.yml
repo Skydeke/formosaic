@@ -39,17 +39,16 @@ jobs:
   android-apk:
     name: Android APKs (debug & release)
     runs-on: ubuntu-latest
+    container:
+      image: rust:latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Set up Java (for Android build tools)
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            curl unzip openjdk-21-jdk-headless ca-certificates pkg-config libssl-dev
 
       - name: Cache Cargo
         uses: actions/cache@v4
@@ -74,8 +73,7 @@ jobs:
         run: make setup-android
 
       - name: Restore release keystore
-        run: |
-          echo "$ANDROID_KEYSTORE_B64" | base64 -d > release.keystore
+        run: echo "$ANDROID_KEYSTORE_B64" | base64 -d > release.keystore
 
       - name: Build APK (debug)
         run: make android-apk
@@ -83,15 +81,12 @@ jobs:
       - name: Build APK (release)
         run: make android-apk-release
 
-      - name: Upload APKs (debug)
+      - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
-          name: apk-debug
-          path: target/debug/apk/*.apk
+          name: android-apks
+          path: |
+            target/debug/apk/*.apk
+            target/release/apk/*.apk
 
-      - name: Upload APKs (release)
-        uses: actions/upload-artifact@v4
-        with:
-          name: apk-release
-          path: target/release/apk/*.apk
 

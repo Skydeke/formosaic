@@ -32,7 +32,8 @@ android_apk:
   stage: build_android
   image: rust:latest
   before_script:
-    - apt-get update && apt-get install -y --no-install-recommends curl unzip openjdk-17-jdk-headless ca-certificates
+    - apt-get update
+    - apt-get install -y --no-install-recommends curl unzip openjdk-21-jdk-headless ca-certificates pkg-config libssl-dev
   script:
     - make setup-android
     - echo "$ANDROID_KEYSTORE_B64" | base64 -d > release.keystore
