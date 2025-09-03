@@ -1,0 +1,7 @@
+.cache
+
+
+# Added by cargo
+/target
+
+.android

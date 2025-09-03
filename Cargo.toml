@@ -1,0 +1,70 @@
+[package]
+name = "formosaic"
+version = "0.1.0"
+edition = "2021"
+description = "A simple Polysphere-like puzzle game using OpenGL ES"
+
+[features]
+default = ["egl", "glx", "x11", "wayland", "wgl"]
+egl = ["glutin-winit/egl", "png"]
+glx = ["glutin-winit/glx"]
+wgl = ["glutin-winit/wgl"]
+x11 = ["glutin-winit/x11"]
+wayland = ["glutin-winit/wayland", "winit/wayland-dlopen", "winit/wayland-csd-adwaita"]
+
+[dependencies]
+gl = "0.14"
+cgmath = "0.18"
+log = "0.4"
+env_logger = "0.10"
+
+# Windowing + GL context
+glutin = { version = "0.32.3", default-features = false }
+glutin-winit = {  version = "0.5.0", default-features = false }
+png = { version = "0.17.6", optional = true }
+raw-window-handle = "0.6"
+winit = { version = "0.30.12", default-features = false, features = ["rwh_06"] }
+drm = { version = "0.12", optional = true }
+
+[target.'cfg(target_os = "android")'.dependencies]
+winit = { version = "0.30.12", default-features = false, features = ["android-native-activity", "rwh_06"] }
+android_logger = "0.13"
+ndk-context = "0.1.1"
+jni = "0.21.1"
+
+[[example]]
+name = "android"
+crate-type = ["cdylib"]
+
+[[example]]
+name = "desktop"
+
+[package.metadata.android]
+package = "com.formosaic.game"
+apk_name = "Formosaic"
+label = "Formosaic"
+icon = "@mipmap/ic_launcher"
+fullscreen = false
+orientation = "sensorLandscape"
+resources = "android/res"
+
+[package.metadata.android.sdk]
+target_sdk_version = 33
+min_sdk_version = 21
+
+[[package.metadata.android.uses_feature]]
+name = "android.hardware.vulkan.level"
+required = true
+version = 1
+
+[[package.metadata.android.uses_permission]]
+name = "android.permission.WRITE_EXTERNAL_STORAGE"
+
+# See https://developer.android.com/guide/topics/manifest/activity-element
+[package.metadata.android.application.activity]
+#name = "org.libsdl.app.SDLActivity"
+label = "Formosaic"
+
+[build-dependencies]
+gl_generator = "0.14"
+cfg_aliases = "0.2.1"
