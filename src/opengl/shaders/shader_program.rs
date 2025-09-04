@@ -1,5 +1,5 @@
-use crate::shaders::RenderState;
-use crate::shaders::{shader::Shader, uniform::Uniform};
+use crate::opengl::shaders::RenderState;
+use crate::opengl::shaders::{shader::Shader, uniform::Uniform};
 use std::ffi::CString;
 use std::ptr;
 

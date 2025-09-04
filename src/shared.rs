@@ -74,6 +74,15 @@ pub fn run_engine(event_loop: EventLoop<()>) {
                             game.update(delta_time);
                             gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
                             game.render(renderer, size.width, size.height);
+                            let err = unsafe { gl::GetError() };
+                            if err != gl::NO_ERROR {
+                                log::log!(
+                                    log::Level::Error,
+                                    "OpenGL error: 0x{:X} -- {}",
+                                    err,
+                                    gl_error_to_string(err)
+                                );
+                            }
                             let _ = gl_surface.swap_buffers(gl_context);
                         }
                     }
@@ -280,6 +289,27 @@ fn get_gl_string(variant: gl::types::GLenum) -> Option<&'static CStr> {
     }
 }
 
+fn gl_error_to_string(err: gl::types::GLenum) -> &'static str {
+    match err {
+        gl::NO_ERROR => "No error",
+        gl::INVALID_ENUM => {
+            "GL_INVALID_ENUM: An unacceptable value is specified for an enumerated argument."
+        }
+        gl::INVALID_VALUE => "GL_INVALID_VALUE: A numeric argument is out of range.",
+        gl::INVALID_OPERATION => {
+            "GL_INVALID_OPERATION: The specified operation is not allowed in the current state."
+        }
+        gl::STACK_OVERFLOW => "GL_STACK_OVERFLOW: This command would cause a stack overflow.",
+        gl::STACK_UNDERFLOW => "GL_STACK_UNDERFLOW: This command would cause a stack underflow.",
+        gl::OUT_OF_MEMORY => {
+            "GL_OUT_OF_MEMORY: There is not enough memory left to execute the command."
+        }
+        gl::INVALID_FRAMEBUFFER_OPERATION => {
+            "GL_INVALID_FRAMEBUFFER_OPERATION: The framebuffer object is not complete."
+        }
+        _ => "Unknown OpenGL error",
+    }
+}
 fn cleanup_gl() {
     unsafe {
         GAME = None;

@@ -1,100 +1,81 @@
-use crate::shaders::{uniform::UniformAdapter, RenderState, ShaderProgram, UniformMatrix4};
+use crate::mesh::Mesh;
+use crate::opengl::constants::data_type::DataType;
+use crate::opengl::constants::render_mode::RenderMode;
+use crate::opengl::constants::vbo_usage::VboUsage;
+use crate::opengl::objects::attribute::Attribute;
+use crate::opengl::objects::data_buffer::DataBuffer;
+use crate::opengl::objects::index_buffer::IndexBuffer;
+use crate::opengl::objects::vao::Vao;
+use crate::opengl::shaders::{uniform::UniformAdapter, RenderState, ShaderProgram, UniformMatrix4};
+use crate::simple_model::SimpleModel;
+
 use cgmath::Matrix4;
+use std::rc::Rc;
 
 pub struct Renderer {
     shader_program: ShaderProgram,
-    vao: u32,
-    vbo: u32,
+    model: SimpleModel,
 }
-
-// Embed shaders at compile-time
-const VERTEX_SHADER_SOURCE: &str = include_str!("../assets/shaders/basic.vert.glsl");
-const FRAGMENT_SHADER_SOURCE: &str = include_str!("../assets/shaders/basic.frag.glsl");
 
 impl Renderer {
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        log::info!("Initializing renderer");
+        log::info!("Initializing Renderer");
 
-        // Create ShaderProgram using the new system
-        let mut shader_program =
-            ShaderProgram::from_sources(VERTEX_SHADER_SOURCE, FRAGMENT_SHADER_SOURCE)?;
+        let vertex_src = include_str!("../assets/shaders/basic.vert.glsl");
+        let fragment_src = include_str!("../assets/shaders/basic.frag.glsl");
 
-        // Add MVP uniform as per-instance uniform (changes for each object rendered)
+        let mut shader_program = ShaderProgram::from_sources(vertex_src, fragment_src)?;
+
         shader_program.add_per_instance_uniform(Box::new(UniformAdapter {
             uniform: UniformMatrix4::new("uMVP"),
             extractor: Box::new(|state: &RenderState| state.mvp_matrix),
         }));
 
-        // Vertex data
-        let vertices: [f32; 18] = [
-            -0.5, -0.5, 0.0, 1.0, 0.0, 0.0, // Bottom left - Red
-            0.5, -0.5, 0.0, 0.0, 1.0, 0.0, // Bottom right - Green
-            0.0, 0.5, 0.0, 0.0, 0.0, 1.0, // Top center - Blue
-        ];
+        let positions: [f32; 9] = [-0.5, -0.5, 0.0, 0.5, -0.5, 0.0, 0.0, 0.5, 0.0];
+        let colors: [f32; 9] = [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0];
+        let indicies: [i32; 3] = [0, 1, 2];
 
-        let mut vao = 0;
-        let mut vbo = 0;
-        unsafe {
-            gl::GenVertexArrays(1, &mut vao);
-            gl::GenBuffers(1, &mut vbo);
+        let mut pos_buffer = DataBuffer::new(VboUsage::StaticDraw);
+        pos_buffer.store_float(0, &positions);
 
-            gl::BindVertexArray(vao);
-            gl::BindBuffer(gl::ARRAY_BUFFER, vbo);
-            gl::BufferData(
-                gl::ARRAY_BUFFER,
-                (vertices.len() * std::mem::size_of::<f32>()) as isize,
-                vertices.as_ptr() as *const _,
-                gl::STATIC_DRAW,
-            );
+        let mut color_buffer = DataBuffer::new(VboUsage::StaticDraw);
+        color_buffer.store_float(0, &colors);
 
-            // Position attribute
-            gl::VertexAttribPointer(
-                0,
-                3,
-                gl::FLOAT,
-                gl::FALSE,
-                6 * std::mem::size_of::<f32>() as i32,
-                0 as *const _,
-            );
-            gl::EnableVertexAttribArray(0);
+        let mut indicies_buffer = IndexBuffer::new(VboUsage::StaticDraw);
+        indicies_buffer.store_int(0, &indicies);
 
-            // Color attribute
-            gl::VertexAttribPointer(
-                1,
-                3,
-                gl::FLOAT,
-                gl::FALSE,
-                6 * std::mem::size_of::<f32>() as i32,
-                (3 * std::mem::size_of::<f32>()) as *const _,
-            );
-            gl::EnableVertexAttribArray(1);
+        let mut vao = Vao::create();
+        // Position attribute -> VBO 0
+        let pos_attr = Attribute::of(0, 3, DataType::Float, false);
+        vao.load_data_buffer(Rc::new(pos_buffer), &[pos_attr]);
+        // Color attribute -> VBO 1
+        let color_attr = Attribute::of(1, 3, DataType::Float, false);
+        vao.load_data_buffer(Rc::new(color_buffer), &[color_attr]);
+        vao.load_index_buffer(Rc::new(indicies_buffer), true);
 
-            gl::BindVertexArray(0);
-        }
+        let mesh = Mesh::from_vao(vao);
+        let model = SimpleModel::with_bounds(vec![mesh], RenderMode::Triangles);
 
-        log::info!("Renderer initialized successfully");
+        log::log!(log::Level::Info, "Renderer initialized successfully");
         Ok(Self {
             shader_program,
-            vao,
-            vbo,
+            model,
         })
     }
 
     pub fn render_triangle(&mut self, mvp: &Matrix4<f32>) {
-        // Create render state
         let mut render_state = RenderState::new();
         render_state.mvp_matrix = *mvp;
 
         self.shader_program.bind();
-
-        // Update per-instance uniforms (MVP matrix in this case)
         self.shader_program
             .update_per_instance_uniforms(&render_state);
 
-        unsafe {
-            gl::BindVertexArray(self.vao);
-            gl::DrawArrays(gl::TRIANGLES, 0, 3);
-            gl::BindVertexArray(0);
+        let mesh_count = self.model.meshes().len();
+        for i in 0..mesh_count {
+            self.model.bind_and_configure(i);
+            self.model.render(&render_state, i);
+            self.model.unbind(i);
         }
 
         self.shader_program.unbind();
@@ -103,9 +84,6 @@ impl Renderer {
 
 impl Drop for Renderer {
     fn drop(&mut self) {
-        unsafe {
-            gl::DeleteVertexArrays(1, &self.vao);
-            gl::DeleteBuffers(1, &self.vbo);
-        }
+        log::info!("Renderer dropped");
     }
 }
