@@ -1,6 +1,7 @@
-// src/game.rs
-use crate::graphics::Renderer;
-use crate::input::{Event, Key};
+use crate::{
+    input::{Event, Key},
+    renderer::Renderer,
+};
 use cgmath::{perspective, Deg, Matrix4, Point3, Vector3};
 
 pub struct Game {
@@ -13,6 +14,9 @@ pub struct Game {
     drag_start_y: f32,
     start_rotation_x: f32,
     start_rotation_y: f32,
+
+    // Animation time for advanced effects
+    time: f32,
 }
 
 impl Game {
@@ -26,6 +30,7 @@ impl Game {
             drag_start_y: 0.0,
             start_rotation_x: 0.0,
             start_rotation_y: 0.0,
+            time: 0.0,
         })
     }
 
@@ -57,12 +62,10 @@ impl Game {
                     let dx = (x - self.drag_start_x) / width;
                     let dy = (y - self.drag_start_y) / height;
 
-                    self.rotation_x = self.start_rotation_x + dy * std::f32::consts::PI; // up/down
+                    self.rotation_x = self.start_rotation_x + dy * std::f32::consts::PI;
                     self.rotation_y = self.start_rotation_y + dx * std::f32::consts::TAU;
-                    // left/right
                 }
             }
-
             Event::TouchDown {
                 id: _,
                 x,
@@ -107,9 +110,11 @@ impl Game {
         }
     }
 
-    pub fn update(&mut self) {
+    pub fn update(&mut self, delta_time: f32) {
+        self.time += delta_time;
+
         if !self.mouse_dragging {
-            self.rotation_y += 0.002;
+            self.rotation_y += 0.2 * delta_time;
         }
     }
 
@@ -128,5 +133,9 @@ impl Game {
 
         let mvp = projection * view * model;
         renderer.render_triangle(&mvp);
+    }
+
+    pub fn get_time(&self) -> f32 {
+        self.time
     }
 }

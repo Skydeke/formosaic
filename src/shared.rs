@@ -18,9 +18,8 @@ use winit::keyboard::NamedKey;
 use winit::raw_window_handle::HasWindowHandle;
 use winit::window::{Window, WindowAttributes};
 
-use crate::input::Event as EngineEvent;
 use crate::input::Key as EngineKey;
-use crate::{Game, Renderer};
+use crate::{input::Event as EngineEvent, renderer::Renderer, Game};
 
 static mut GAME: Option<Game> = None;
 static mut RENDERER: Option<Renderer> = None;
@@ -31,6 +30,7 @@ static mut WINDOW: Option<std::sync::Arc<Window>> = None;
 pub fn run_engine(event_loop: EventLoop<()>) {
     let mut gl_initialized = false;
     let mut last_cursor_pos = (0.0_f32, 0.0_f32);
+    let mut last_frame_time = std::time::Instant::now();
 
     event_loop.run(move |event, elwt| {
         elwt.set_control_flow(ControlFlow::Poll);
@@ -66,9 +66,12 @@ pub fn run_engine(event_loop: EventLoop<()>) {
                             Some(window),
                         ) = (&mut GAME, &mut RENDERER, &GL_SURFACE, &GL_CONTEXT, &WINDOW)
                         {
-                            let size = window.inner_size();
+                            let now = std::time::Instant::now();
+                            let delta_time = (now - last_frame_time).as_secs_f32();
+                            last_frame_time = now;
 
-                            game.update();
+                            let size = window.inner_size();
+                            game.update(delta_time);
                             gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT);
                             game.render(renderer, size.width, size.height);
                             let _ = gl_surface.swap_buffers(gl_context);
@@ -214,7 +217,7 @@ fn init_gl(elwt: &winit::event_loop::ActiveEventLoop) -> Result<(), Box<dyn std:
     };
 
     let context_attributes = ContextAttributesBuilder::new()
-        .with_context_api(ContextApi::Gles(Some(glutin::context::Version::new(2, 0))))
+        .with_context_api(ContextApi::Gles(Some(glutin::context::Version::new(3, 0))))
         .build(Some(window_handle));
 
     let not_current_gl_context: NotCurrentContext = unsafe {
