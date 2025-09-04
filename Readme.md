@@ -1,6 +1,7 @@
 # Formosaic
 
-**Formosaic** (from *Form + Mosaic*) is a simple OpenGL ES game written in Rust, designed to help you learn Rust and OpenGL while having fun. In the game, your goal is to find the correct viewing angle to assemble low-poly artwork fragments into a complete image.
+**Formosaic** (from *Form + Mosaic*) is a simple OpenGL ES game written in Rust, designed to help you learn Rust and graphics programming while having fun.  
+In the game, your goal is to find the correct viewing angle to assemble low-poly artwork fragments into a complete image.
 
 ---
 
@@ -8,17 +9,20 @@
 
 - Cross-platform: runs on **Linux** and **Android**
 - Minimal OpenGL ES 2.0/3.0 rendering pipeline
-- Input handling via **SDL2** for keyboard, mouse, and touch
+- Input and window management via **winit** + **glutin**
 - Clean and extendable Rust project structure
+- Continuous Integration:
+  - **GitHub** and **GitLab** pipelines build both Linux and Android versions
+  - Android release builds are signed using a key provided via **CI Secrets**
 
 ---
 
 ## Project Structure
 
-- `src/` – Rust source files
-- `shaders/` – Placeholder for OpenGL shaders
-- `.android/` – Local Android SDK/NDK installation (created by `make setup-android`)
-- `Makefile` – Build system for Linux and Android targets
+- `src/` – Rust source files  
+- `examples/` – Platform-specific code  
+- `.android/` – Local Android SDK/NDK installation (created by `make setup-android`)  
+- `Makefile` – Build system for Linux and Android targets  
 
 ---
 
@@ -67,11 +71,15 @@ make clean
 
 ## Notes
 
-- The **Formosaic** project is meant as a learning tool. The current version renders a simple scene (triangle or placeholder) and demonstrates input handling, window creation, and OpenGL ES setup.
-- Future improvements may include:
-  - Loading and displaying 3D fragment pieces
-  - Interactive rotation via mouse or touch
-  - Detecting when the puzzle is correctly assembled
+Formosaic currently renders a simple placeholder scene and demonstrates:  
+- Window creation  
+- OpenGL ES context setup  
+- Input handling on desktop and mobile  
+
+Planned improvements include:  
+- Loading and displaying 3D fragment pieces  
+- Interactive rotation via mouse or touch  
+- Detecting when the puzzle is correctly assembled  
 
 ---
 
@@ -86,6 +94,3 @@ make help
 This will display all targets, including setup, Android builds, Linux builds, and cleaning commands.
 
 ---
-
-**Enjoy exploring Formosaic and learning Rust with OpenGL ES!**
-
