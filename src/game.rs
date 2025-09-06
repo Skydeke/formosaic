@@ -39,8 +39,8 @@ impl Game {
             Event::MouseDown {
                 x,
                 y,
-                width,
-                height,
+                width: _,
+                height: _,
             } => {
                 self.mouse_dragging = true;
                 self.drag_start_x = x;

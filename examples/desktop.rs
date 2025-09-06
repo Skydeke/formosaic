@@ -1,12 +1,11 @@
-use env_logger;
+use formosaic::game_engine::GameEngine;
 use winit::event_loop::EventLoop;
-
-use formosaic::shared;
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     env_logger::init();
     log::info!("Starting Formosaic (winit/glutin) desktop...");
     let event_loop = EventLoop::new()?;
-    shared::run_engine(event_loop);
+    let mut engine = GameEngine::new();
+    event_loop.run_app(&mut engine)?;
     Ok(())
 }

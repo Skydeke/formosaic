@@ -1,7 +1,6 @@
 use gl::types::*;
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::ptr;
-use std::rc::Rc;
 
 use crate::opengl::constants::data_type::DataType;
 use crate::opengl::constants::vbo_access::VboAccess;
