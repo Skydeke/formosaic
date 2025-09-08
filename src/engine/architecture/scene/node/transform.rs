@@ -93,11 +93,18 @@ impl Transform {
     }
 
     /// Add rotation from Euler angles (in degrees, local space)
-    pub fn add_rotation_euler(&mut self, x: f32, y: f32, z: f32) {
+    pub fn add_rotation_euler_local(&mut self, x: f32, y: f32, z: f32) {
         let delta = Quaternion::from_angle_x(Deg(x))
             * Quaternion::from_angle_y(Deg(y))
             * Quaternion::from_angle_z(Deg(z));
         self.rotation = self.rotation * delta;
+    }
+
+    pub fn add_rotation_euler_world(&mut self, x: f32, y: f32, z: f32) {
+        let delta = Quaternion::from_angle_x(Deg(x))
+            * Quaternion::from_angle_y(Deg(y))
+            * Quaternion::from_angle_z(Deg(z));
+        self.rotation = delta * self.rotation;
     }
 
     /// Set scale

@@ -30,7 +30,7 @@ pub struct Node {
 impl Node {
     pub fn new() -> Self {
         Self {
-            uuid: rand::thread_rng().gen(),
+            uuid: rand::rng().random(),
             hidden: false,
             debug_name: None,
             parent: None,

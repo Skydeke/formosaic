@@ -1,8 +1,9 @@
 use crate::engine::architecture::models::mesh::Mesh;
+use crate::engine::architecture::models::model::Model;
 use crate::engine::architecture::models::simple_model::SimpleModel;
+use crate::engine::architecture::scene::entity::scene_object::SceneObject;
 use crate::engine::architecture::scene::node::node::{NodeBehavior, NodeChildren};
 use crate::engine::architecture::scene::node::transform::Transform;
-use crate::engine::architecture::{models::model::Model, scene::entity::entity::Entity};
 use crate::engine::rendering::abstracted::processable::Processable;
 use crate::opengl::constants::data_type::DataType;
 use crate::opengl::constants::render_mode::RenderMode;
@@ -24,7 +25,7 @@ pub struct SimpleEntity {
     children: Vec<Rc<RefCell<dyn NodeBehavior>>>,
     transform: Transform,
 
-    // Entity-specific properties
+    // SceneObject-specific properties
     model: Rc<RefCell<SimpleModel>>,
 }
 
@@ -63,7 +64,7 @@ impl SimpleEntity {
         let model = SimpleModel::with_bounds(vec![mesh], RenderMode::Triangles);
 
         Self {
-            uuid: rand::thread_rng().gen(),
+            uuid: rand::rng().random(),
             hidden: false,
             debug_name: Some("SimpleTriangle".to_string()),
             children: Vec::new(),
@@ -133,8 +134,8 @@ impl Processable for SimpleEntity {
     }
 }
 
-// Implement Entity trait
-impl Entity for SimpleEntity {
+// Implement SceneObject trait
+impl SceneObject for SimpleEntity {
     fn model(&self) -> Rc<RefCell<impl Model>> {
         self.model.clone()
     }

@@ -57,6 +57,10 @@ impl Application for Formosaic {
             let triangle = Rc::new(RefCell::new(SimpleEntity::new()));
             scene.add_node(triangle.clone());
             self.simple_triangle = Some(triangle);
+
+            let triangle2 = Rc::new(RefCell::new(SimpleEntity::new()));
+            triangle2.borrow_mut().transform_mut().position = Vector3::new(1.0, 0.0, 0.0);
+            scene.add_node(triangle2.clone());
         }
     }
 
@@ -66,11 +70,10 @@ impl Application for Formosaic {
         // Automatic rotation when not dragging
         if !self.mouse_dragging {
             if let Some(triangle) = &self.simple_triangle {
-                triangle.borrow_mut().transform_mut().add_rotation_euler(
-                    0.0,
-                    20.0 * delta_time,
-                    0.0,
-                );
+                triangle
+                    .borrow_mut()
+                    .transform_mut()
+                    .add_rotation_euler_local(0.0, 20.0 * delta_time, 0.0);
             }
         }
     }

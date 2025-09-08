@@ -5,7 +5,7 @@ use crate::engine::architecture::models::model::Model;
 use crate::engine::architecture::scene::node::node::{NodeBehavior, NodeChildren};
 use crate::engine::rendering::abstracted::processable::Processable;
 
-pub trait Entity: NodeBehavior + NodeChildren + Processable {
+pub trait SceneObject: NodeBehavior + NodeChildren + Processable {
     fn model(&self) -> Rc<RefCell<impl Model>>;
 
     fn process(&mut self);

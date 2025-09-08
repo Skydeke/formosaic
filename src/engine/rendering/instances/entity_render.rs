@@ -1,16 +1,16 @@
 use crate::engine::architecture::models::model::Model;
-use crate::engine::architecture::scene::entity::entity::Entity;
+use crate::engine::architecture::scene::entity::scene_object::SceneObject;
 use crate::engine::architecture::scene::scene_context::SceneContext;
 use crate::engine::rendering::abstracted::irenderer::IRenderer;
 use crate::opengl::shaders::{uniform::UniformAdapter, RenderState, ShaderProgram, UniformMatrix4};
 use std::cell::RefCell;
 use std::rc::Rc;
 
-pub struct EntityRenderer<T: Entity> {
+pub struct EntityRenderer<T: SceneObject> {
     shader_program: ShaderProgram<T>,
 }
 
-impl<T: Entity + 'static> EntityRenderer<T> {
+impl<T: SceneObject + 'static> EntityRenderer<T> {
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
         log::info!("Initializing EntityRenderer");
         let vertex_src = include_str!("../../../../assets/shaders/basic.vert.glsl");
@@ -36,7 +36,7 @@ impl<T: Entity + 'static> EntityRenderer<T> {
     }
 }
 
-impl<T: Entity + 'static> IRenderer for EntityRenderer<T> {
+impl<T: SceneObject + 'static> IRenderer for EntityRenderer<T> {
     fn render(&mut self, context: &SceneContext) {
         let camera = context.get_camera();
 
@@ -87,7 +87,7 @@ impl<T: Entity + 'static> IRenderer for EntityRenderer<T> {
     }
 }
 
-impl<T: Entity> Drop for EntityRenderer<T> {
+impl<T: SceneObject> Drop for EntityRenderer<T> {
     fn drop(&mut self) {
         log::info!("EntityRenderer dropped");
     }

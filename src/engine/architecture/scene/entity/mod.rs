@@ -1,2 +1,2 @@
-pub mod entity;
+pub mod scene_object;
 pub mod simple_entity;

@@ -1,2 +1,2 @@
 pub mod camera;
-pub mod simple_triangle_renderer;
+pub mod entity_render;

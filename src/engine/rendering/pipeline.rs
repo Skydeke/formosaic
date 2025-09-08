@@ -4,9 +4,7 @@ use cgmath::Vector2;
 
 use crate::engine::{
     architecture::scene::{entity::simple_entity::SimpleEntity, scene_context::SceneContext},
-    rendering::{
-        abstracted::irenderer::IRenderer, instances::simple_triangle_renderer::EntityRenderer,
-    },
+    rendering::{abstracted::irenderer::IRenderer, instances::entity_render::EntityRenderer},
 };
 
 pub struct Pipeline {
@@ -22,7 +20,7 @@ impl Pipeline {
         };
 
         let simple_triangle_renderer: EntityRenderer<SimpleEntity> =
-            EntityRenderer::new().expect("Cant creter EntityRenderer.");
+            EntityRenderer::new().expect("Cant create EntityRenderer.");
         pipeline.add_renderer(Box::new(simple_triangle_renderer));
 
         pipeline

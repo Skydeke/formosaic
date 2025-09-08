@@ -5,7 +5,7 @@ use glutin::context::PossiblyCurrentContext;
 use glutin::{
     config::ConfigTemplateBuilder,
     context::{ContextApi, ContextAttributesBuilder, NotCurrentContext},
-    display::GetGlDisplay,
+    display::{Display, GetGlDisplay},
     prelude::*,
     surface::{Surface, SurfaceAttributesBuilder, SwapInterval, WindowSurface},
 };
@@ -29,9 +29,10 @@ use crate::{input::Event as EngineEvent, Formosaic};
 pub struct GameEngine {
     game: Option<Formosaic>,
     pipeline: Option<Pipeline>,
-    scene_context: Rc<RefCell<SceneContext>>,
-    gl_context: Option<PossiblyCurrentContext>,
-    gl_surface: Option<Surface<WindowSurface>>,
+    scene_context: Option<Rc<RefCell<SceneContext>>>,
+    gl_display: Option<Display>,                // persistent
+    gl_context: Option<PossiblyCurrentContext>, // recreated
+    gl_surface: Option<Surface<WindowSurface>>, // recreated
     window: Option<Arc<Window>>,
     gl_initialized: bool,
     last_cursor_pos: (f32, f32),
@@ -67,153 +68,173 @@ impl ApplicationHandler for GameEngine {
         match event {
             WindowEvent::CloseRequested => _event_loop.exit(),
             WindowEvent::Resized(size) => {
-                if self.gl_initialized {
-                    if let (Some(gl_surface), Some(gl_context)) =
-                        (&self.gl_surface, &self.gl_context)
-                    {
-                        gl_surface.resize(
-                            gl_context,
-                            std::num::NonZeroU32::new(size.width.max(1)).unwrap(),
-                            std::num::NonZeroU32::new(size.height.max(1)).unwrap(),
-                        );
-                        unsafe { gl::Viewport(0, 0, size.width as i32, size.height as i32) };
-                    }
+                if let (Some(gl_surface), Some(gl_context)) = (&self.gl_surface, &self.gl_context) {
+                    gl_surface.resize(
+                        gl_context,
+                        NonZeroU32::new(size.width.max(1)).unwrap(),
+                        NonZeroU32::new(size.height.max(1)).unwrap(),
+                    );
+                    unsafe { gl::Viewport(0, 0, size.width as i32, size.height as i32) };
                 }
             }
             WindowEvent::RedrawRequested => {
-                if self.gl_initialized {
-                    if let (Some(game), Some(gl_surface), Some(gl_context), Some(window)) = (
-                        &mut self.game,
-                        &self.gl_surface,
-                        &self.gl_context,
-                        &self.window,
-                    ) {
-                        let now = std::time::Instant::now();
-                        let delta_time = (now - self.last_frame_time).as_secs_f32();
-                        self.last_frame_time = now;
+                if let (Some(game), Some(gl_surface), Some(gl_context), Some(window)) = (
+                    &mut self.game,
+                    &self.gl_surface,
+                    &self.gl_context,
+                    &self.window,
+                ) {
+                    let now = std::time::Instant::now();
+                    let delta_time = (now - self.last_frame_time).as_secs_f32();
+                    self.last_frame_time = now;
 
-                        let size = window.inner_size();
-                        game.on_update(delta_time, &mut self.scene_context.borrow_mut());
-                        self.pipeline
-                            .as_mut()
-                            .unwrap()
-                            .draw(size.width, size.height);
+                    let size = window.inner_size();
+                    game.on_update(
+                        delta_time,
+                        &mut self
+                            .scene_context
+                            .clone()
+                            .expect("No scene context.")
+                            .borrow_mut(),
+                    );
+                    self.pipeline
+                        .as_mut()
+                        .unwrap()
+                        .draw(size.width, size.height);
 
-                        let err = unsafe { gl::GetError() };
-                        if err != gl::NO_ERROR {
-                            log::error!(
-                                "OpenGL error: 0x{:X} -- {}",
-                                err,
-                                Self::gl_error_to_string(err)
-                            );
-                        }
-                        let _ = gl_surface.swap_buffers(gl_context);
+                    let err = unsafe { gl::GetError() };
+                    if err != gl::NO_ERROR {
+                        log::error!(
+                            "OpenGL error: 0x{:X} -- {}",
+                            err,
+                            Self::gl_error_to_string(err)
+                        );
                     }
+                    let _ = gl_surface.swap_buffers(gl_context);
                 }
             }
             WindowEvent::MouseInput { state, button, .. } => {
-                if self.gl_initialized {
-                    if let (Some(game), Some(window)) = (&mut self.game, &self.window) {
-                        let size = window.inner_size();
-                        match (state, button) {
-                            (ElementState::Pressed, MouseButton::Left) => {
-                                game.on_event(
-                                    &EngineEvent::MouseDown {
-                                        x: self.last_cursor_pos.0,
-                                        y: self.last_cursor_pos.1,
-                                        width: size.width as f32,
-                                        height: size.height as f32,
-                                    },
-                                    &mut self.scene_context.borrow_mut(),
-                                );
-                            }
-                            (ElementState::Released, MouseButton::Left) => {
-                                game.on_event(
-                                    &EngineEvent::MouseUp {
-                                        x: self.last_cursor_pos.0,
-                                        y: self.last_cursor_pos.1,
-                                        width: size.width as f32,
-                                        height: size.height as f32,
-                                    },
-                                    &mut self.scene_context.borrow_mut(),
-                                );
-                            }
-                            _ => {}
+                if let (Some(game), Some(window)) = (&mut self.game, &self.window) {
+                    let size = window.inner_size();
+                    match (state, button) {
+                        (ElementState::Pressed, MouseButton::Left) => {
+                            game.on_event(
+                                &EngineEvent::MouseDown {
+                                    x: self.last_cursor_pos.0,
+                                    y: self.last_cursor_pos.1,
+                                    width: size.width as f32,
+                                    height: size.height as f32,
+                                },
+                                &mut self
+                                    .scene_context
+                                    .clone()
+                                    .expect("No scene context.")
+                                    .borrow_mut(),
+                            );
                         }
+                        (ElementState::Released, MouseButton::Left) => {
+                            game.on_event(
+                                &EngineEvent::MouseUp {
+                                    x: self.last_cursor_pos.0,
+                                    y: self.last_cursor_pos.1,
+                                    width: size.width as f32,
+                                    height: size.height as f32,
+                                },
+                                &mut self
+                                    .scene_context
+                                    .clone()
+                                    .expect("No scene context.")
+                                    .borrow_mut(),
+                            );
+                        }
+                        _ => {}
                     }
                 }
             }
             WindowEvent::CursorMoved { position, .. } => {
                 self.last_cursor_pos = (position.x as f32, position.y as f32);
-                if self.gl_initialized {
-                    if let (Some(game), Some(window)) = (&mut self.game, &self.window) {
-                        let size = window.inner_size();
+                if let (Some(game), Some(window)) = (&mut self.game, &self.window) {
+                    let size = window.inner_size();
+                    game.on_event(
+                        &EngineEvent::MouseMove {
+                            x: self.last_cursor_pos.0,
+                            y: self.last_cursor_pos.1,
+                            width: size.width as f32,
+                            height: size.height as f32,
+                        },
+                        &mut self
+                            .scene_context
+                            .clone()
+                            .expect("No scene context.")
+                            .borrow_mut(),
+                    );
+                }
+            }
+            WindowEvent::KeyboardInput { event, .. } => {
+                if let Some(game) = &mut self.game {
+                    let key = match event.logical_key {
+                        Key::Named(NamedKey::Escape) => EngineKey::Escape,
+                        Key::Character(ref s) if s.as_str() == "r" => EngineKey::R,
+                        Key::Named(NamedKey::Space) => EngineKey::Space,
+                        _ => EngineKey::Other,
+                    };
+                    if event.state == ElementState::Pressed {
                         game.on_event(
-                            &EngineEvent::MouseMove {
-                                x: self.last_cursor_pos.0,
-                                y: self.last_cursor_pos.1,
-                                width: size.width as f32,
-                                height: size.height as f32,
-                            },
-                            &mut self.scene_context.borrow_mut(),
+                            &EngineEvent::KeyDown { key },
+                            &mut self
+                                .scene_context
+                                .clone()
+                                .expect("No scene context.")
+                                .borrow_mut(),
                         );
                     }
                 }
             }
-            WindowEvent::KeyboardInput { event, .. } => {
-                if self.gl_initialized {
-                    if let Some(game) = &mut self.game {
-                        let key = match event.logical_key {
-                            Key::Named(NamedKey::Escape) => EngineKey::Escape,
-                            Key::Character(ref s) if s.as_str() == "r" => EngineKey::R,
-                            Key::Named(NamedKey::Space) => EngineKey::Space,
-                            _ => EngineKey::Other,
-                        };
-                        if event.state == ElementState::Pressed {
+            WindowEvent::Touch(touch) => {
+                if let (Some(game), Some(window)) = (&mut self.game, &self.window) {
+                    let size = window.inner_size();
+                    match touch.phase {
+                        winit::event::TouchPhase::Started => {
                             game.on_event(
-                                &EngineEvent::KeyDown { key },
-                                &mut self.scene_context.borrow_mut(),
+                                &EngineEvent::TouchDown {
+                                    id: touch.id,
+                                    x: touch.location.x as f32,
+                                    y: touch.location.y as f32,
+                                    width: size.width as f32,
+                                    height: size.height as f32,
+                                },
+                                &mut self
+                                    .scene_context
+                                    .clone()
+                                    .expect("No scene context.")
+                                    .borrow_mut(),
                             );
                         }
-                    }
-                }
-            }
-            WindowEvent::Touch(touch) => {
-                if self.gl_initialized {
-                    if let (Some(game), Some(window)) = (&mut self.game, &self.window) {
-                        let size = window.inner_size();
-                        match touch.phase {
-                            winit::event::TouchPhase::Started => {
-                                game.on_event(
-                                    &EngineEvent::TouchDown {
-                                        id: touch.id,
-                                        x: touch.location.x as f32,
-                                        y: touch.location.y as f32,
-                                        width: size.width as f32,
-                                        height: size.height as f32,
-                                    },
-                                    &mut self.scene_context.borrow_mut(),
-                                );
-                            }
-                            winit::event::TouchPhase::Moved => {
-                                game.on_event(
-                                    &EngineEvent::TouchMove {
-                                        id: touch.id,
-                                        x: touch.location.x as f32,
-                                        y: touch.location.y as f32,
-                                        width: size.width as f32,
-                                        height: size.height as f32,
-                                    },
-                                    &mut self.scene_context.borrow_mut(),
-                                );
-                            }
-                            winit::event::TouchPhase::Ended
-                            | winit::event::TouchPhase::Cancelled => {
-                                game.on_event(
-                                    &EngineEvent::TouchUp { id: touch.id },
-                                    &mut self.scene_context.borrow_mut(),
-                                );
-                            }
+                        winit::event::TouchPhase::Moved => {
+                            game.on_event(
+                                &EngineEvent::TouchMove {
+                                    id: touch.id,
+                                    x: touch.location.x as f32,
+                                    y: touch.location.y as f32,
+                                    width: size.width as f32,
+                                    height: size.height as f32,
+                                },
+                                &mut self
+                                    .scene_context
+                                    .clone()
+                                    .expect("No scene context.")
+                                    .borrow_mut(),
+                            );
+                        }
+                        winit::event::TouchPhase::Ended | winit::event::TouchPhase::Cancelled => {
+                            game.on_event(
+                                &EngineEvent::TouchUp { id: touch.id },
+                                &mut self
+                                    .scene_context
+                                    .clone()
+                                    .expect("No scene context.")
+                                    .borrow_mut(),
+                            );
                         }
                     }
                 }
@@ -234,7 +255,8 @@ impl GameEngine {
         Self {
             game: None,
             pipeline: None,
-            scene_context: Rc::new(RefCell::new(SceneContext::new())),
+            scene_context: None,
+            gl_display: None,
             gl_context: None,
             gl_surface: None,
             window: None,
@@ -243,39 +265,44 @@ impl GameEngine {
             last_frame_time: std::time::Instant::now(),
         }
     }
+
     fn init_gl(
         &mut self,
         elwt: &winit::event_loop::ActiveEventLoop,
     ) -> Result<(), Box<dyn std::error::Error>> {
-        let wb = WindowAttributes::default().with_title("Formosaic");
-        let template = ConfigTemplateBuilder::new().with_depth_size(24);
-        let display_builder = DisplayBuilder::new().with_window_attributes(Some(wb));
+        // Create display once
+        if self.gl_display.is_none() {
+            let wb = WindowAttributes::default().with_title("Formosaic");
+            let template = ConfigTemplateBuilder::new().with_depth_size(24);
+            let display_builder = DisplayBuilder::new().with_window_attributes(Some(wb));
 
-        let (window_opt, gl_config) =
-            display_builder.build(elwt, template, |mut configs| configs.next().unwrap())?;
+            let (window_opt, gl_config) =
+                display_builder.build(elwt, template, |mut configs| configs.next().unwrap())?;
+            let window = window_opt.ok_or("Failed to create window")?;
 
-        let window = window_opt.ok_or("Failed to create window")?;
+            self.window = Some(Arc::new(window));
+            self.gl_display = Some(gl_config.display());
+            // store config too if you need consistent formats across resumes
+        }
 
-        let window_handle = loop {
-            match window.window_handle() {
-                Ok(handle) => break handle.as_raw(),
-                Err(_) => {
-                    log::debug!("Window handle not ready, waiting...");
-                    std::thread::sleep(std::time::Duration::from_millis(10));
-                    continue;
-                }
-            }
-        };
+        let window = self.window.as_ref().unwrap();
+        let display = self.gl_display.as_ref().unwrap();
+
+        let window_handle = window.window_handle()?.as_raw();
 
         let context_attributes = ContextAttributesBuilder::new()
             .with_context_api(ContextApi::Gles(Some(glutin::context::Version::new(3, 0))))
             .build(Some(window_handle));
 
-        let not_current_gl_context: NotCurrentContext = unsafe {
-            gl_config
-                .display()
-                .create_context(&gl_config, &context_attributes)?
-        };
+        // Pick config from display
+        let config = unsafe {
+            display.find_configs(ConfigTemplateBuilder::new().with_depth_size(24).build())
+        }?
+        .next()
+        .ok_or("No GL config found")?;
+
+        let not_current_gl_context: NotCurrentContext =
+            unsafe { display.create_context(&config, &context_attributes)? };
 
         let size = window.inner_size();
         let attrs = SurfaceAttributesBuilder::<WindowSurface>::new().build(
@@ -284,44 +311,38 @@ impl GameEngine {
             NonZeroU32::new(size.height).unwrap(),
         );
 
-        let gl_surface = unsafe {
-            gl_config
-                .display()
-                .create_window_surface(&gl_config, &attrs)?
-        };
+        let gl_surface = unsafe { display.create_window_surface(&config, &attrs)? };
 
         let gl_context = not_current_gl_context.make_current(&gl_surface)?;
         gl_surface.set_swap_interval(&gl_context, SwapInterval::DontWait)?;
 
-        gl::load_with(|s| {
-            gl_config
-                .display()
-                .get_proc_address(&std::ffi::CString::new(s).unwrap())
-        });
+        gl::load_with(|s| display.get_proc_address(&std::ffi::CString::new(s).unwrap()));
 
         if let Some(renderer) = Self::get_gl_string(gl::RENDERER) {
             log::info!("Running on {}", renderer.to_string_lossy());
         }
-        if let Some(version) = Self::get_gl_string(gl::VERSION) {
-            log::info!("OpenGL Version {}", version.to_string_lossy());
-        }
-        if let Some(shaders_version) = Self::get_gl_string(gl::SHADING_LANGUAGE_VERSION) {
-            log::info!("Shaders version {}", shaders_version.to_string_lossy());
-        }
 
+        self.scene_context = Some(Rc::new(RefCell::new(SceneContext::new())));
         self.game = Some(Formosaic::new());
         if let Some(game) = self.game.as_mut() {
-            game.on_init(&mut self.scene_context.borrow_mut());
+            game.on_init(
+                &mut self
+                    .scene_context
+                    .clone()
+                    .expect("No scene context.")
+                    .borrow_mut(),
+            );
         }
-        self.pipeline = Some(Pipeline::new(self.scene_context.clone()));
+        self.pipeline = Some(Pipeline::new(
+            self.scene_context.clone().expect("No scene context."),
+        ));
         self.gl_context = Some(gl_context);
         self.gl_surface = Some(gl_surface);
-        self.window = Some(std::sync::Arc::new(window));
 
         unsafe {
             gl::Enable(gl::DEPTH_TEST);
             gl::ClearColor(0.2, 0.3, 0.3, 1.0);
-            let sz = self.window.as_ref().unwrap().inner_size();
+            let sz = window.inner_size();
             gl::Viewport(0, 0, sz.width as i32, sz.height as i32);
         }
 
@@ -329,10 +350,11 @@ impl GameEngine {
     }
 
     fn cleanup_gl(&mut self) {
+        self.pipeline = None;
         self.game = None;
         self.gl_context = None;
         self.gl_surface = None;
-        self.window = None;
+        // Keep display + window alive!
     }
 
     fn get_gl_string(variant: gl::types::GLenum) -> Option<&'static CStr> {
