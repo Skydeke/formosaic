@@ -2,6 +2,9 @@ use cgmath::Matrix;
 use cgmath::Matrix4;
 use std::ffi::CString;
 
+use crate::engine::rendering::abstracted::processable::Processable;
+use crate::opengl::shaders::RenderState;
+
 pub trait Uniform<T> {
     fn initialize(&mut self, program_id: u32);
     fn load(&self, state: &T);
@@ -135,25 +138,29 @@ impl Uniform<cgmath::Vector3<f32>> for UniformVec3 {
     }
 }
 
+// Define a wrapper that can work with any lifetime
 pub struct UniformAdapter<U, T, F>
 where
     U: Uniform<F>,
     F: Copy,
+    T: Processable,
 {
     pub uniform: U,
-    pub extractor: Box<dyn Fn(&T) -> F>,
+    pub extractor: Box<dyn for<'a> Fn(&'a RenderState<'a, T>) -> F>,
 }
 
-impl<U, T, F> Uniform<T> for UniformAdapter<U, T, F>
+// Implement for any possible lifetime
+impl<U, T, F> Uniform<RenderState<'_, T>> for UniformAdapter<U, T, F>
 where
     U: Uniform<F>,
     F: Copy,
+    T: Processable,
 {
     fn initialize(&mut self, program_id: u32) {
         self.uniform.initialize(program_id);
     }
 
-    fn load(&self, state: &T) {
+    fn load(&self, state: &RenderState<'_, T>) {
         let value = (self.extractor)(state);
         self.uniform.load(&value);
     }

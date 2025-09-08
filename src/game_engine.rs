@@ -12,18 +12,24 @@ use glutin::{
 use glutin_winit::DisplayBuilder;
 use winit::keyboard::{Key, NamedKey};
 
+use std::cell::RefCell;
+use std::rc::Rc;
 use std::sync::Arc;
 use std::{ffi::CStr, num::NonZeroU32};
 use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::raw_window_handle::HasWindowHandle;
 use winit::window::{Window, WindowAttributes, WindowId};
 
+use crate::engine::architecture::scene::scene_context::SceneContext;
+use crate::engine::rendering::pipeline::Pipeline;
+use crate::formosaic::Application;
 use crate::input::Key as EngineKey;
-use crate::{input::Event as EngineEvent, renderer::Renderer, Game};
+use crate::{input::Event as EngineEvent, Formosaic};
 
 pub struct GameEngine {
-    game: Option<Game>,
-    renderer: Option<Renderer>,
+    game: Option<Formosaic>,
+    pipeline: Option<Pipeline>,
+    scene_context: Rc<RefCell<SceneContext>>,
     gl_context: Option<PossiblyCurrentContext>,
     gl_surface: Option<Surface<WindowSurface>>,
     window: Option<Arc<Window>>,
@@ -76,15 +82,8 @@ impl ApplicationHandler for GameEngine {
             }
             WindowEvent::RedrawRequested => {
                 if self.gl_initialized {
-                    if let (
-                        Some(game),
-                        Some(renderer),
-                        Some(gl_surface),
-                        Some(gl_context),
-                        Some(window),
-                    ) = (
+                    if let (Some(game), Some(gl_surface), Some(gl_context), Some(window)) = (
                         &mut self.game,
-                        &mut self.renderer,
                         &self.gl_surface,
                         &self.gl_context,
                         &self.window,
@@ -94,9 +93,11 @@ impl ApplicationHandler for GameEngine {
                         self.last_frame_time = now;
 
                         let size = window.inner_size();
-                        game.update(delta_time);
-                        unsafe { gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT) };
-                        game.render(renderer, size.width, size.height);
+                        game.on_update(delta_time, &mut self.scene_context.borrow_mut());
+                        self.pipeline
+                            .as_mut()
+                            .unwrap()
+                            .draw(size.width, size.height);
 
                         let err = unsafe { gl::GetError() };
                         if err != gl::NO_ERROR {
@@ -116,20 +117,26 @@ impl ApplicationHandler for GameEngine {
                         let size = window.inner_size();
                         match (state, button) {
                             (ElementState::Pressed, MouseButton::Left) => {
-                                game.handle_event(EngineEvent::MouseDown {
-                                    x: self.last_cursor_pos.0,
-                                    y: self.last_cursor_pos.1,
-                                    width: size.width as f32,
-                                    height: size.height as f32,
-                                });
+                                game.on_event(
+                                    &EngineEvent::MouseDown {
+                                        x: self.last_cursor_pos.0,
+                                        y: self.last_cursor_pos.1,
+                                        width: size.width as f32,
+                                        height: size.height as f32,
+                                    },
+                                    &mut self.scene_context.borrow_mut(),
+                                );
                             }
                             (ElementState::Released, MouseButton::Left) => {
-                                game.handle_event(EngineEvent::MouseUp {
-                                    x: self.last_cursor_pos.0,
-                                    y: self.last_cursor_pos.1,
-                                    width: size.width as f32,
-                                    height: size.height as f32,
-                                });
+                                game.on_event(
+                                    &EngineEvent::MouseUp {
+                                        x: self.last_cursor_pos.0,
+                                        y: self.last_cursor_pos.1,
+                                        width: size.width as f32,
+                                        height: size.height as f32,
+                                    },
+                                    &mut self.scene_context.borrow_mut(),
+                                );
                             }
                             _ => {}
                         }
@@ -141,12 +148,15 @@ impl ApplicationHandler for GameEngine {
                 if self.gl_initialized {
                     if let (Some(game), Some(window)) = (&mut self.game, &self.window) {
                         let size = window.inner_size();
-                        game.handle_event(EngineEvent::MouseMove {
-                            x: self.last_cursor_pos.0,
-                            y: self.last_cursor_pos.1,
-                            width: size.width as f32,
-                            height: size.height as f32,
-                        });
+                        game.on_event(
+                            &EngineEvent::MouseMove {
+                                x: self.last_cursor_pos.0,
+                                y: self.last_cursor_pos.1,
+                                width: size.width as f32,
+                                height: size.height as f32,
+                            },
+                            &mut self.scene_context.borrow_mut(),
+                        );
                     }
                 }
             }
@@ -160,7 +170,10 @@ impl ApplicationHandler for GameEngine {
                             _ => EngineKey::Other,
                         };
                         if event.state == ElementState::Pressed {
-                            game.handle_event(EngineEvent::KeyDown { key });
+                            game.on_event(
+                                &EngineEvent::KeyDown { key },
+                                &mut self.scene_context.borrow_mut(),
+                            );
                         }
                     }
                 }
@@ -171,26 +184,35 @@ impl ApplicationHandler for GameEngine {
                         let size = window.inner_size();
                         match touch.phase {
                             winit::event::TouchPhase::Started => {
-                                game.handle_event(EngineEvent::TouchDown {
-                                    id: touch.id,
-                                    x: touch.location.x as f32,
-                                    y: touch.location.y as f32,
-                                    width: size.width as f32,
-                                    height: size.height as f32,
-                                });
+                                game.on_event(
+                                    &EngineEvent::TouchDown {
+                                        id: touch.id,
+                                        x: touch.location.x as f32,
+                                        y: touch.location.y as f32,
+                                        width: size.width as f32,
+                                        height: size.height as f32,
+                                    },
+                                    &mut self.scene_context.borrow_mut(),
+                                );
                             }
                             winit::event::TouchPhase::Moved => {
-                                game.handle_event(EngineEvent::TouchMove {
-                                    id: touch.id,
-                                    x: touch.location.x as f32,
-                                    y: touch.location.y as f32,
-                                    width: size.width as f32,
-                                    height: size.height as f32,
-                                });
+                                game.on_event(
+                                    &EngineEvent::TouchMove {
+                                        id: touch.id,
+                                        x: touch.location.x as f32,
+                                        y: touch.location.y as f32,
+                                        width: size.width as f32,
+                                        height: size.height as f32,
+                                    },
+                                    &mut self.scene_context.borrow_mut(),
+                                );
                             }
                             winit::event::TouchPhase::Ended
                             | winit::event::TouchPhase::Cancelled => {
-                                game.handle_event(EngineEvent::TouchUp { id: touch.id });
+                                game.on_event(
+                                    &EngineEvent::TouchUp { id: touch.id },
+                                    &mut self.scene_context.borrow_mut(),
+                                );
                             }
                         }
                     }
@@ -211,7 +233,8 @@ impl GameEngine {
     pub fn new() -> Self {
         Self {
             game: None,
-            renderer: None,
+            pipeline: None,
+            scene_context: Rc::new(RefCell::new(SceneContext::new())),
             gl_context: None,
             gl_surface: None,
             window: None,
@@ -286,8 +309,11 @@ impl GameEngine {
             log::info!("Shaders version {}", shaders_version.to_string_lossy());
         }
 
-        self.renderer = Some(Renderer::new()?);
-        self.game = Some(Game::new()?);
+        self.game = Some(Formosaic::new());
+        if let Some(game) = self.game.as_mut() {
+            game.on_init(&mut self.scene_context.borrow_mut());
+        }
+        self.pipeline = Some(Pipeline::new(self.scene_context.clone()));
         self.gl_context = Some(gl_context);
         self.gl_surface = Some(gl_surface);
         self.window = Some(std::sync::Arc::new(window));
@@ -304,7 +330,6 @@ impl GameEngine {
 
     fn cleanup_gl(&mut self) {
         self.game = None;
-        self.renderer = None;
         self.gl_context = None;
         self.gl_surface = None;
         self.window = None;

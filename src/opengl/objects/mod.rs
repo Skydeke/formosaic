@@ -1,4 +1,5 @@
 pub mod attribute;
+pub mod clip_plane;
 pub mod data_buffer;
 pub mod index_buffer;
 pub mod ivbo;

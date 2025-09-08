@@ -1,8 +1,10 @@
-use crate::opengl::{
-    constants::{data_type::DataType, render_mode::RenderMode},
-    objects::{attribute::Attribute, vao::Vao},
+use crate::{
+    engine::rendering::abstracted::renderable::Renderable,
+    opengl::{
+        constants::{data_type::DataType, render_mode::RenderMode},
+        objects::{attribute::Attribute, vao::Vao},
+    },
 };
-use crate::renderable::Renderable;
 
 pub struct Mesh {
     vert: Vec<f32>,

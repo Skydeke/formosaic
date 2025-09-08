@@ -1,16 +1,18 @@
-use crate::opengl::shaders::RenderState;
-use crate::opengl::shaders::{shader::Shader, uniform::Uniform};
+use crate::engine::rendering::abstracted::processable::Processable;
+use crate::opengl::shaders::{shader::Shader, uniform::Uniform, RenderState};
+use std::cell::RefCell;
 use std::ffi::CString;
 use std::ptr;
+use std::rc::Rc;
 
-pub struct ShaderProgram {
+pub struct ShaderProgram<T: Processable> {
     id: u32,
-    per_render_uniforms: Vec<Box<dyn Uniform<RenderState>>>,
-    per_instance_uniforms: Vec<Box<dyn Uniform<RenderState>>>,
+    per_render_uniforms: Vec<Rc<RefCell<dyn for<'a> Uniform<RenderState<'a, T>>>>>,
+    per_instance_uniforms: Vec<Rc<RefCell<dyn for<'a> Uniform<RenderState<'a, T>>>>>,
     bound_program: Option<u32>,
 }
 
-impl ShaderProgram {
+impl<T: Processable> ShaderProgram<T> {
     pub fn new(shaders: &[Shader]) -> Result<Self, Box<dyn std::error::Error>> {
         unsafe {
             let id = gl::CreateProgram();
@@ -18,15 +20,12 @@ impl ShaderProgram {
                 return Err("Failed to create shader program".into());
             }
 
-            // Attach all shaders
             for shader in shaders {
                 shader.attach(id);
             }
 
-            // Link program
             gl::LinkProgram(id);
 
-            // Check link status
             let mut success = gl::FALSE as i32;
             gl::GetProgramiv(id, gl::LINK_STATUS, &mut success);
             if success != gl::TRUE as i32 {
@@ -35,7 +34,6 @@ impl ShaderProgram {
                 return Err(format!("Program linking failed: {}", error_log).into());
             }
 
-            // Validate program
             gl::ValidateProgram(id);
             gl::GetProgramiv(id, gl::VALIDATE_STATUS, &mut success);
             if success != gl::TRUE as i32 {
@@ -43,7 +41,6 @@ impl ShaderProgram {
                 log::warn!("Program validation warning: {}", error_log);
             }
 
-            // Detach and clean up shaders
             for shader in shaders {
                 shader.detach(id);
                 shader.delete();
@@ -81,27 +78,33 @@ impl ShaderProgram {
         }
     }
 
-    pub fn add_per_render_uniform(&mut self, mut uniform: Box<dyn Uniform<RenderState>>) {
+    pub fn add_per_render_uniform(
+        &mut self,
+        uniform: Rc<RefCell<dyn for<'a> Uniform<RenderState<'a, T>>>>,
+    ) {
         self.bind();
-        uniform.initialize(self.id);
+        uniform.borrow_mut().initialize(self.id);
         self.per_render_uniforms.push(uniform);
     }
 
-    pub fn add_per_instance_uniform(&mut self, mut uniform: Box<dyn Uniform<RenderState>>) {
+    pub fn add_per_instance_uniform(
+        &mut self,
+        uniform: Rc<RefCell<dyn for<'a> Uniform<RenderState<'a, T>>>>,
+    ) {
         self.bind();
-        uniform.initialize(self.id);
+        uniform.borrow_mut().initialize(self.id);
         self.per_instance_uniforms.push(uniform);
     }
 
-    pub fn update_per_render_uniforms(&self, state: &RenderState) {
+    pub fn update_per_render_uniforms<'a>(&self, state: &RenderState<'a, T>) {
         for uniform in &self.per_render_uniforms {
-            uniform.load(state);
+            uniform.borrow().load(state);
         }
     }
 
-    pub fn update_per_instance_uniforms(&self, state: &RenderState) {
+    pub fn update_per_instance_uniforms<'a>(&self, state: &RenderState<'a, T>) {
         for uniform in &self.per_instance_uniforms {
-            uniform.load(state);
+            uniform.borrow().load(state);
         }
     }
 
@@ -120,7 +123,7 @@ impl ShaderProgram {
     }
 }
 
-impl Drop for ShaderProgram {
+impl<T: Processable> Drop for ShaderProgram<T> {
     fn drop(&mut self) {
         unsafe { gl::DeleteProgram(self.id) };
     }
