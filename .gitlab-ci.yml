@@ -8,7 +8,7 @@ linux_release:
   stage: build
   image: rust:latest
   script:
-    - apt-get update && apt-get install -y --no-install-recommends ca-certificates build-essential cmake clang libclang-dev
+    - apt-get update && apt-get install -y --no-install-recommends curl unzip openjdk-21-jdk-headless ca-certificates pkg-config libssl-dev build-essential cmake clang libclang-dev
     - make setup-android
     - make linux-build-release
   artifacts:

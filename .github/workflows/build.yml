@@ -18,7 +18,7 @@ jobs:
       - name: Install dependencies
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends ca-certificates build-essential cmake clang libclang-dev
+          apt-get install -y --no-install-recommends curl unzip openjdk-21-jdk-headless ca-certificates pkg-config libssl-dev build-essential cmake clang libclang-dev
 
       - name: Set up Android SDK/NDK & cargo-apk
         run: make setup-android
