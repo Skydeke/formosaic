@@ -37,4 +37,9 @@ fn main() {
     Registry::new(Api::Gles2, (3, 0), Profile::Core, Fallbacks::All, [])
         .write_bindings(StructGenerator, &mut file)
         .unwrap();
+
+    let target = std::env::var("TARGET").unwrap();
+    if target.contains("android") {
+        println!("cargo:rustc-link-lib=c++_shared"); // link against NDK libc++
+    }
 }

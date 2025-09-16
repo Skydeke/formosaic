@@ -1,5 +1,7 @@
 use crate::{
-    engine::rendering::abstracted::renderable::Renderable,
+    engine::{
+        architecture::models::material::Material, rendering::abstracted::renderable::Renderable,
+    },
     opengl::{
         constants::{data_type::DataType, render_mode::RenderMode},
         objects::{attribute::Attribute, vao::Vao},
@@ -10,6 +12,7 @@ pub struct Mesh {
     vert: Vec<f32>,
     attributes: Vec<Attribute>,
     vao: Vao,
+    material: Option<Material>,
 }
 
 impl Mesh {
@@ -18,6 +21,7 @@ impl Mesh {
             vert: vec![],
             attributes: vec![],
             vao,
+            material: None,
         }
     }
 
