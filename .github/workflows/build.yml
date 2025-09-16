@@ -20,6 +20,9 @@ jobs:
           apt-get update
           apt-get install -y --no-install-recommends ca-certificates build-essential cmake clang libclang-dev
 
+      - name: Set up Android SDK/NDK & cargo-apk
+        run: make setup-android
+
       - name: Build Linux release
         run: make linux-build-release
 

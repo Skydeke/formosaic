@@ -9,6 +9,7 @@ linux_release:
   image: rust:latest
   script:
     - apt-get update && apt-get install -y --no-install-recommends ca-certificates build-essential cmake clang libclang-dev
+    - make setup-android
     - make linux-build-release
   artifacts:
     name: "linux-desktop-release"
