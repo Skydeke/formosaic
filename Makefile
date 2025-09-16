@@ -15,6 +15,7 @@ SDK_DIR := $(ANDROID_DIR)/sdk
 CMDLINE_TOOLS := $(SDK_DIR)/cmdline-tools/latest
 PLATFORM := "platforms;android-33"
 BUILD_TOOLS := "build-tools;33.0.2"
+NDK := "ndk;25.2.9519653"
 NDK_PATH := "ndk/25.2.9519653"
 NDK_HOME := $(SDK_DIR)/$(NDK_PATH)
 NDK_SYSROOT := $(NDK_HOME)/toolchains/llvm/prebuilt/linux-x86_64/sysroot
