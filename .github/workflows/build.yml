@@ -10,16 +10,20 @@ jobs:
   linux-release:
     name: Linux desktop (release build-only)
     runs-on: ubuntu-latest
+    container:
+      image: rust:latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
+      - name: Install dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends ca-certificates cmake clang libclang-dev
 
-      - name: Build Linux release (no run)
+      - name: Build Linux release
         run: make linux-build-release
 
-      - name: Upload Linux artifact
+      - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: linux-desktop-release
@@ -36,7 +40,7 @@ jobs:
       - name: Install system dependencies
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends curl unzip openjdk-21-jdk-headless ca-certificates pkg-config libssl-dev
+          apt-get install -y --no-install-recommends curl unzip openjdk-21-jdk-headless ca-certificates pkg-config libssl-dev cmake clang libclang-dev
 
       - name: Set up Android SDK/NDK & cargo-apk
         run: make setup-android

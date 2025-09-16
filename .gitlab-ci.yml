@@ -8,7 +8,7 @@ linux_release:
   stage: build
   image: rust:latest
   script:
-    - apt-get update && apt-get install -y --no-install-recommends ca-certificates
+    - apt-get update && apt-get install -y --no-install-recommends ca-certificates cmake clang libclang-dev
     - make linux-build-release
   artifacts:
     name: "linux-desktop-release"
@@ -25,7 +25,7 @@ android_apk:
   image: rust:latest
   before_script:
     - apt-get update
-    - apt-get install -y --no-install-recommends curl unzip openjdk-21-jdk-headless ca-certificates pkg-config libssl-dev
+    - apt-get install -y --no-install-recommends curl unzip openjdk-21-jdk-headless ca-certificates pkg-config libssl-dev cmake clang libclang-dev
   script:
     - make setup-android
     - echo "$ANDROID_KEYSTORE_B64" | base64 -d > release.keystore
