@@ -175,6 +175,7 @@ impl ApplicationHandler for GameEngine {
                     let key = match event.logical_key {
                         Key::Named(NamedKey::Escape) => EngineKey::Escape,
                         Key::Character(ref s) if s.as_str() == "r" => EngineKey::R,
+                        Key::Character(ref s) if s.as_str() == "n" => EngineKey::N,
                         Key::Named(NamedKey::Space) => EngineKey::Space,
                         _ => EngineKey::Other,
                     };

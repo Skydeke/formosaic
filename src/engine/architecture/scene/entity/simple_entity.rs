@@ -4,6 +4,7 @@ use crate::engine::architecture::scene::entity::scene_object::SceneObject;
 use crate::engine::architecture::scene::node::node::{NodeBehavior, NodeChildren};
 use crate::engine::architecture::scene::node::transform::Transform;
 use crate::engine::rendering::abstracted::processable::Processable;
+use cgmath::{Vector3, Vector4};
 use rand::Rng;
 use std::any::Any;
 use std::cell::RefCell;
@@ -31,6 +32,15 @@ impl SimpleEntity {
             transform: Transform::new(),
             model,
         }
+    }
+
+    pub fn centroid(&self) -> Vector3<f32> {
+        let centroid = self.model.borrow().centroid().unwrap(); // Vector3<f32>
+        let centroid4 = Vector4::new(centroid.x, centroid.y, centroid.z, 1.0);
+
+        let world_centroid4 = self.transform.get_matrix() * centroid4;
+        let world_centroid = world_centroid4.truncate(); // back to Vector3<f32>
+        world_centroid
     }
 }
 

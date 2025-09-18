@@ -1,3 +1,5 @@
+use cgmath::Vector3;
+
 use crate::engine::rendering::abstracted::processable::Processable;
 use crate::{engine::architecture::models::mesh::Mesh, opengl::shaders::render_state::RenderState};
 
@@ -19,4 +21,7 @@ pub trait Model {
 
     /// Returns all meshes of the model
     fn get_meshes(&self) -> &[Mesh];
+
+    /// Returns center of Verticies
+    fn centroid(&self) -> Option<Vector3<f32>>;
 }

@@ -1,3 +1,5 @@
+use cgmath::Vector3;
+
 use crate::engine::architecture::models::mesh::Mesh;
 use crate::engine::architecture::models::model::Model; // Add this import
 use crate::engine::rendering::abstracted::processable::Processable;
@@ -8,11 +10,27 @@ use crate::opengl::shaders::RenderState;
 pub struct SimpleModel {
     meshes: Vec<Mesh>,
     render_mode: RenderMode,
+    centroid: Option<Vector3<f32>>,
 }
 
 impl SimpleModel {
     pub fn new(meshes: Vec<Mesh>, render_mode: RenderMode) -> Self {
         Self::with_bounds(meshes, render_mode)
+    }
+
+    pub fn with_centroid(
+        meshes: Vec<Mesh>,
+        render_mode: RenderMode,
+        centroid: Vector3<f32>,
+    ) -> Self {
+        if meshes.is_empty() {
+            panic!("SimpleModel must have at least one mesh");
+        }
+        Self {
+            meshes,
+            render_mode,
+            centroid: Some(centroid),
+        }
     }
 
     pub fn with_bounds(meshes: Vec<Mesh>, render_mode: RenderMode) -> Self {
@@ -22,6 +40,7 @@ impl SimpleModel {
         Self {
             meshes,
             render_mode,
+            centroid: None,
         }
     }
 
@@ -68,5 +87,9 @@ impl Model for SimpleModel {
 
     fn get_meshes(&self) -> &[Mesh] {
         &self.meshes
+    }
+
+    fn centroid(&self) -> Option<Vector3<f32>> {
+        self.centroid
     }
 }

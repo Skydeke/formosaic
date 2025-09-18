@@ -29,7 +29,7 @@ impl Camera {
             projection_matrix: Matrix4::identity(),
             view_matrix: Matrix4::identity(),
             fov: 75.0_f32.to_radians(),
-            near_plane: 0.01,
+            near_plane: 0.3,
             far_plane: 1000.0,
             controller: Box::new(NoneController::new()),
             projection: Box::new(PerspectiveProjection::new()),

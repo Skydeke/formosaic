@@ -1,11 +1,12 @@
-use cgmath::{Deg, One, Quaternion, Rotation3, Vector3};
+use cgmath::{Deg, One, Quaternion, Rotation3, Transform, Vector3};
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     engine::architecture::{
-        models::{mesh::Mesh, model_loader::ModelLoader, simple_model::SimpleModel},
+        models::{mesh::Mesh, model::Model, model_loader::ModelLoader, simple_model::SimpleModel},
         scene::{
-            entity::simple_entity::SimpleEntity, node::node::NodeBehavior,
+            entity::{scene_object::SceneObject, simple_entity::SimpleEntity},
+            node::node::NodeBehavior,
             scene_context::SceneContext,
         },
     },
@@ -30,8 +31,8 @@ pub struct Formosaic {
     drag_start_x: f32,
     drag_start_y: f32,
     time: f32,
-    simple_triangle: Option<Rc<RefCell<dyn NodeBehavior>>>,
-    start_rotation: Option<Quaternion<f32>>,
+    simple_triangle: Option<Rc<RefCell<SimpleEntity>>>,
+    drag_pivot: Option<Vector3<f32>>,
 }
 
 impl Formosaic {
@@ -42,7 +43,7 @@ impl Formosaic {
             drag_start_y: 0.0,
             time: 0.0,
             simple_triangle: None,
-            start_rotation: None,
+            drag_pivot: None,
         }
     }
 }
@@ -86,10 +87,27 @@ impl Application for Formosaic {
         vao.load_data_buffer(Rc::new(color_buffer), &[color_attr]);
         vao.load_index_buffer(Rc::new(indices_buffer), true);
 
+        // Calculate centroid
+        let mut sum = Vector3::new(0.0, 0.0, 0.0);
+        let mut count = 0usize;
+
+        for i in (0..positions.len()).step_by(3) {
+            let v = Vector3::new(positions[i], positions[i + 1], positions[i + 2]);
+            sum += v;
+            count += 1;
+        }
+
+        let centroid = if count > 0 {
+            sum / count as f32
+        } else {
+            Vector3::new(0.0, 0.0, 0.0)
+        };
+
         let mesh = Mesh::from_vao(vao);
-        let model = Rc::new(RefCell::new(SimpleModel::with_bounds(
+        let model = Rc::new(RefCell::new(SimpleModel::with_centroid(
             vec![mesh],
             RenderMode::Triangles,
+            centroid,
         )));
 
         let path = "models/Cactus/cactus.fbx";
@@ -108,7 +126,17 @@ impl Application for Formosaic {
             triangle
                 .borrow_mut()
                 .transform_mut()
+                .set_rotation(Quaternion::one());
+            triangle
+                .borrow_mut()
+                .transform_mut()
                 .set_scale(Vector3::new(0.005, 0.005, 0.005));
+            let centeroid = triangle.borrow_mut().centroid();
+            let center_at_orig = triangle.borrow_mut().transform_mut().position - centeroid;
+            triangle
+                .borrow_mut()
+                .transform_mut()
+                .set_position(center_at_orig);
             scene.add_node(triangle.clone());
             self.simple_triangle = Some(triangle);
 
@@ -121,16 +149,6 @@ impl Application for Formosaic {
 
     fn on_update(&mut self, delta_time: f32, _context: &mut SceneContext) {
         self.time += delta_time;
-
-        // Automatic rotation when not dragging
-        if !self.mouse_dragging {
-            if let Some(triangle) = &self.simple_triangle {
-                triangle
-                    .borrow_mut()
-                    .transform_mut()
-                    .add_rotation_euler_local(0.0, 20.0 * delta_time, 0.0);
-            }
-        }
     }
 
     fn on_event(&mut self, event: &Event, _context: &mut SceneContext) {
@@ -139,11 +157,7 @@ impl Application for Formosaic {
                 self.mouse_dragging = true;
                 self.drag_start_x = *x;
                 self.drag_start_y = *y;
-
-                // store starting rotation for relative drag
-                if let Some(triangle) = &self.simple_triangle {
-                    self.start_rotation = Some(triangle.borrow().transform().rotation);
-                }
+                self.drag_pivot = Some(self.simple_triangle.as_ref().unwrap().borrow().centroid());
             }
 
             Event::MouseUp { .. } | Event::TouchUp { .. } => {
@@ -169,21 +183,43 @@ impl Application for Formosaic {
 
                     if let Some(triangle) = &self.simple_triangle {
                         let mut tri = triangle.borrow_mut();
+                        let center = tri.centroid();
                         let t = tri.transform_mut();
-                        if let Some(start_rot) = self.start_rotation {
-                            // Apply rotation relative to starting rotation
-                            let rot_x = Quaternion::from_angle_x(Deg(dy * 180.0));
-                            let rot_y = Quaternion::from_angle_y(Deg(dx * 360.0));
-                            t.rotation = rot_y * rot_x * start_rot;
-                        }
+
+                        t.rotate_around_world(center, Quaternion::from_angle_x(Deg(dy * 180.0)));
+                        t.rotate_around_world(center, Quaternion::from_angle_y(Deg(dx * 180.0)));
                     }
+
+                    self.drag_start_x = *x;
+                    self.drag_start_y = *y;
                 }
             }
 
             Event::KeyDown { key } => {
                 if let Key::R = key {
                     if let Some(triangle) = &self.simple_triangle {
-                        triangle.borrow_mut().transform_mut().rotation = Quaternion::one();
+                        triangle
+                            .borrow_mut()
+                            .transform_mut()
+                            .set_rotation(Quaternion::one());
+                        triangle
+                            .borrow_mut()
+                            .transform_mut()
+                            .set_scale(Vector3::new(0.005, 0.005, 0.005));
+                        let centeroid = triangle.borrow_mut().centroid();
+                        let center_at_orig =
+                            triangle.borrow_mut().transform_mut().position - centeroid;
+                        triangle
+                            .borrow_mut()
+                            .transform_mut()
+                            .set_position(center_at_orig);
+                    }
+                } else if let Key::N = key {
+                    if let Some(triangle) = &self.simple_triangle {
+                        triangle.borrow_mut().transform_mut().rotate_around_world(
+                            Vector3::new(1.0, 0.0, 0.0),
+                            Quaternion::from_angle_z(Deg(90.0)),
+                        );
                     }
                 }
             }

@@ -2,6 +2,7 @@
 pub enum Key {
     Escape,
     R,
+    N,
     Space,
     Other,
 }

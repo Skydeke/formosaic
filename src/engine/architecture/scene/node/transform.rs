@@ -1,4 +1,6 @@
-use cgmath::{Deg, InnerSpace, Matrix4, One, Quaternion, Rotation3, Vector3};
+use cgmath::{
+    Deg, InnerSpace, Matrix3, Matrix4, One, Quaternion, Rotation3, SquareMatrix, Vector3,
+};
 
 #[derive(Clone, Debug)]
 pub struct Transform {
@@ -112,10 +114,35 @@ impl Transform {
         self.scale = scale;
     }
 
+    /// Set position
+    pub fn set_position(&mut self, position: Vector3<f32>) {
+        self.position = position;
+    }
+
+    /// Set rotation
+    pub fn set_rotation(&mut self, rotation: Quaternion<f32>) {
+        self.rotation = rotation;
+    }
+
     /// Scale multiplicatively
     pub fn scale_by(&mut self, factor: f32) {
         self.scale.x *= factor;
         self.scale.y *= factor;
         self.scale.z *= factor;
+    }
+
+    /// Rotate this transform around a point in world space
+    pub fn rotate_around_world(&mut self, world_point: Vector3<f32>, rotation: Quaternion<f32>) {
+        let current = Matrix4::from_translation(self.position) * Matrix4::from(self.rotation);
+        let new_m = Matrix4::from_translation(world_point)
+            * Matrix4::from(rotation)
+            * Matrix4::from_translation(-world_point)
+            * current;
+
+        // extract rotation and position
+        let rotation_matrix =
+            Matrix3::from_cols(new_m.x.truncate(), new_m.y.truncate(), new_m.z.truncate());
+        self.rotation = Quaternion::from(rotation_matrix).normalize();
+        self.position = new_m.w.truncate();
     }
 }

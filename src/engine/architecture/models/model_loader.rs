@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use cgmath::Vector3;
 use russimp::material::Material as AiMaterial;
 use russimp::mesh::Mesh as AiMesh;
 use russimp::scene::{PostProcess, Scene};
@@ -41,12 +42,31 @@ impl ModelLoader {
         )
         .expect(&format!("Failed to load model '{}'", path));
 
-        // Convert ai_meshes to our Mesh structs
-        let meshes = scene.meshes.iter().map(Self::process_mesh).collect();
+        let mut sum = Vector3::new(0.0, 0.0, 0.0);
+        let mut count = 0usize;
 
-        Rc::new(RefCell::new(SimpleModel::new(
+        let meshes: Vec<Mesh> = scene
+            .meshes
+            .iter()
+            .map(|m| {
+                for v in &m.vertices {
+                    sum += Vector3::new(v.x, v.y, v.z);
+                    count += 1;
+                }
+                Self::process_mesh(m)
+            })
+            .collect();
+
+        let centroid = if count > 0 {
+            sum / count as f32
+        } else {
+            Vector3::new(0.0, 0.0, 0.0)
+        };
+
+        Rc::new(RefCell::new(SimpleModel::with_centroid(
             meshes,
             RenderMode::Triangles,
+            centroid,
         )))
     }
 
