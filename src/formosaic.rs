@@ -1,9 +1,12 @@
-use cgmath::{Deg, One, Quaternion, Rotation3, Transform, Vector3};
+use cgmath::{Deg, One, Quaternion, Rotation3, Transform, Vector3, Vector4};
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     engine::architecture::{
-        models::{mesh::Mesh, model::Model, model_loader::ModelLoader, simple_model::SimpleModel},
+        models::{
+            material::Material, mesh::Mesh, model::Model, model_loader::ModelLoader,
+            simple_model::SimpleModel,
+        },
         scene::{
             entity::{scene_object::SceneObject, simple_entity::SimpleEntity},
             node::node::NodeBehavior,
@@ -63,18 +66,10 @@ impl Application for Formosaic {
             0.5, -0.5, 0.0, // Top
             0.0, 0.5, 0.0, // Right
         ];
-
-        let colors: [f32; 9] = [
-            1.0, 0.0, 0.0, // Red
-            0.0, 1.0, 0.0, // Green
-            0.0, 0.0, 1.0, // Blue
-        ];
         let indices: [i32; 3] = [0, 1, 2];
 
         let mut pos_buffer = DataBuffer::new(VboUsage::StaticDraw);
         pos_buffer.store_float(0, &positions);
-        let mut color_buffer = DataBuffer::new(VboUsage::StaticDraw);
-        color_buffer.store_float(0, &colors);
         let mut indices_buffer = IndexBuffer::new(VboUsage::StaticDraw);
         indices_buffer.store_int(0, &indices);
 
@@ -82,9 +77,6 @@ impl Application for Formosaic {
         // Position attribute -> VBO 0
         let pos_attr = Attribute::of(0, 3, DataType::Float, false);
         vao.load_data_buffer(Rc::new(pos_buffer), &[pos_attr]);
-        // Color attribute -> VBO 1
-        let color_attr = Attribute::of(1, 3, DataType::Float, false);
-        vao.load_data_buffer(Rc::new(color_buffer), &[color_attr]);
         vao.load_index_buffer(Rc::new(indices_buffer), true);
 
         // Calculate centroid
@@ -103,7 +95,8 @@ impl Application for Formosaic {
             Vector3::new(0.0, 0.0, 0.0)
         };
 
-        let mesh = Mesh::from_vao(vao);
+        let mut mesh = Mesh::from_vao(vao);
+        mesh.set_material(Material::new().with_diffuse_color(Vector4::new(0.0, 1.0, 0.0, 0.0)));
         let model = Rc::new(RefCell::new(SimpleModel::with_centroid(
             vec![mesh],
             RenderMode::Triangles,
@@ -111,7 +104,6 @@ impl Application for Formosaic {
         )));
 
         let path = "models/Cactus/cactus.fbx";
-        // Load the model using your ModelLoader
         let cactus_model: Rc<RefCell<SimpleModel>> = ModelLoader::load(path);
 
         // Set camera position
@@ -132,11 +124,11 @@ impl Application for Formosaic {
                 .transform_mut()
                 .set_scale(Vector3::new(0.005, 0.005, 0.005));
             let centeroid = triangle.borrow_mut().centroid();
-            let center_at_orig = triangle.borrow_mut().transform_mut().position - centeroid;
+            let c = triangle.borrow_mut().transform_mut().position - centeroid;
             triangle
                 .borrow_mut()
                 .transform_mut()
-                .set_position(center_at_orig);
+                .set_position(Vector3::new(0.0, c.y, 0.0));
             scene.add_node(triangle.clone());
             self.simple_triangle = Some(triangle);
 
@@ -186,8 +178,8 @@ impl Application for Formosaic {
                         let center = tri.centroid();
                         let t = tri.transform_mut();
 
-                        t.rotate_around_world(center, Quaternion::from_angle_x(Deg(dy * 180.0)));
-                        t.rotate_around_world(center, Quaternion::from_angle_y(Deg(dx * 180.0)));
+                        t.rotate_around_world(center, Quaternion::from_angle_x(Deg(dy * 360.0)));
+                        t.rotate_around_world(center, Quaternion::from_angle_y(Deg(dx * 360.0)));
                     }
 
                     self.drag_start_x = *x;

@@ -1,11 +1,12 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use cgmath::Vector3;
+use cgmath::{Vector3, Vector4};
 use russimp::material::Material as AiMaterial;
 use russimp::mesh::Mesh as AiMesh;
 use russimp::scene::{PostProcess, Scene};
 
+use crate::engine::architecture::models::material::Material;
 use crate::engine::architecture::models::mesh::Mesh;
 use crate::engine::architecture::models::simple_model::SimpleModel;
 use crate::opengl::constants::data_type::DataType;
@@ -30,8 +31,7 @@ impl ModelLoader {
             &bytes,
             vec![
                 PostProcess::Triangulate,
-                PostProcess::GenerateSmoothNormals,
-                PostProcess::JoinIdenticalVertices,
+                PostProcess::GenerateNormals,
                 PostProcess::ImproveCacheLocality,
                 PostProcess::OptimizeMeshes,
                 PostProcess::CalculateTangentSpace,
@@ -45,6 +45,12 @@ impl ModelLoader {
         let mut sum = Vector3::new(0.0, 0.0, 0.0);
         let mut count = 0usize;
 
+        let materials: Vec<Material> = scene
+            .materials
+            .iter()
+            .map(|ai_mat| Self::process_material(ai_mat))
+            .collect();
+
         let meshes: Vec<Mesh> = scene
             .meshes
             .iter()
@@ -53,7 +59,12 @@ impl ModelLoader {
                     sum += Vector3::new(v.x, v.y, v.z);
                     count += 1;
                 }
-                Self::process_mesh(m)
+                let mut mesh = Self::process_mesh(m);
+                let mat_index = m.material_index as usize;
+                if mat_index < materials.len() {
+                    mesh.set_material(materials[mat_index].clone());
+                }
+                mesh
             })
             .collect();
 
@@ -187,18 +198,18 @@ impl ModelLoader {
         let pos_attr = Attribute::of(0, 3, DataType::Float, false);
         vao.load_data_buffer(Rc::new(pos_buffer), &[pos_attr]);
 
-        if !normals.is_empty() {
-            let mut normal_buffer = DataBuffer::new(VboUsage::StaticDraw);
-            normal_buffer.store_float(0, &normals);
-            let normal_attr = Attribute::of(1, 3, DataType::Float, false);
-            vao.load_data_buffer(Rc::new(normal_buffer), &[normal_attr]);
-        }
-
         if !texcoords.is_empty() {
             let mut tex_buffer = DataBuffer::new(VboUsage::StaticDraw);
             tex_buffer.store_float(0, &texcoords);
-            let tex_attr = Attribute::of(2, 2, DataType::Float, false);
+            let tex_attr = Attribute::of(1, 2, DataType::Float, false);
             vao.load_data_buffer(Rc::new(tex_buffer), &[tex_attr]);
+        }
+
+        if !normals.is_empty() {
+            let mut normal_buffer = DataBuffer::new(VboUsage::StaticDraw);
+            normal_buffer.store_float(0, &normals);
+            let normal_attr = Attribute::of(2, 3, DataType::Float, false);
+            vao.load_data_buffer(Rc::new(normal_buffer), &[normal_attr]);
         }
 
         let mut indices_buffer = IndexBuffer::new(VboUsage::StaticDraw);
@@ -208,20 +219,30 @@ impl ModelLoader {
         Mesh::from_vao(vao)
     }
 
-    /// Optional: Print material info
-    fn process_material(ai_material: &AiMaterial) {
-        for prop in &ai_material.properties {
-            if prop.key == "?mat.name" {
-                if let russimp::material::PropertyTypeInfo::String(name) = &prop.data {
-                    println!("Material: {}", name);
-                }
-            }
+    fn process_material(ai_material: &AiMaterial) -> Material {
+        let mut mat = Material::default();
 
-            if prop.key == "$clr.diffuse" {
-                if let russimp::material::PropertyTypeInfo::FloatArray(values) = &prop.data {
-                    println!("Diffuse color: {:?}", values);
+        for prop in &ai_material.properties {
+            match prop.key.as_str() {
+                "$clr.diffuse" => {
+                    if let russimp::material::PropertyTypeInfo::FloatArray(values) = &prop.data {
+                        if values.len() >= 3 {
+                            mat.diffuse_color = Vector4::new(values[0], values[1], values[2], 1.0);
+                        }
+                    }
                 }
+                "$clr.specular" => {
+                    if let russimp::material::PropertyTypeInfo::FloatArray(values) = &prop.data {
+                        if values.len() >= 3 {
+                            mat.specular_color = Vector4::new(values[0], values[1], values[2], 1.0);
+                        }
+                    }
+                }
+                // handle transparency, emissive, etc.
+                _ => {}
             }
         }
+
+        mat
     }
 }

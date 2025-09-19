@@ -4,6 +4,7 @@ use cgmath::Vector4;
 
 use crate::opengl::textures::texture::Texture;
 
+#[derive(Clone)]
 pub struct Material {
     pub name: Option<String>,
 
@@ -14,10 +15,8 @@ pub struct Material {
     pub transparent_color: Vector4<f32>,
 
     pub diffuse_texture: Option<Rc<dyn Texture>>,
-    pub use_diffuse_tex: bool,
 
     pub normal_texture: Option<Rc<dyn Texture>>,
-    pub use_normal_tex: bool,
 
     pub cull_backface: bool,
 }
@@ -33,10 +32,8 @@ impl Default for Material {
             transparent_color: Vector4::new(0.0, 0.0, 0.0, 0.0),
 
             diffuse_texture: None,
-            use_diffuse_tex: false,
 
             normal_texture: None,
-            use_normal_tex: false,
 
             cull_backface: true,
         }
@@ -76,13 +73,11 @@ impl Material {
 
     pub fn with_diffuse_texture(mut self, texture: Rc<dyn Texture>) -> Self {
         self.diffuse_texture = Some(texture);
-        self.use_diffuse_tex = true;
         self
     }
 
     pub fn with_normal_texture(mut self, texture: Rc<dyn Texture>) -> Self {
         self.normal_texture = Some(texture);
-        self.use_normal_tex = true;
         self
     }
 

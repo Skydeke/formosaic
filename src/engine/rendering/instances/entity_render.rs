@@ -1,7 +1,11 @@
+use cgmath::Vector3;
+
 use crate::engine::architecture::models::model::Model;
 use crate::engine::architecture::scene::entity::scene_object::SceneObject;
 use crate::engine::architecture::scene::scene_context::SceneContext;
 use crate::engine::rendering::abstracted::irenderer::IRenderer;
+use crate::opengl::shaders::uniform::{UniformBoolean, UniformTexture};
+use crate::opengl::shaders::UniformVec3;
 use crate::opengl::shaders::{uniform::UniformAdapter, RenderState, ShaderProgram, UniformMatrix4};
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -28,6 +32,38 @@ impl<T: SceneObject + 'static> EntityRenderer<T> {
             uniform: UniformMatrix4::new("uModel"),
             extractor: Box::new(|state: &RenderState<T>| {
                 state.instance().unwrap().transform().get_matrix()
+            }),
+        })));
+
+        shader_program.add_per_instance_uniform(Rc::new(RefCell::new(UniformAdapter {
+            uniform: UniformTexture::new("albedoTex", 0),
+            extractor: Box::new(|state: &RenderState<T>| {
+                state
+                    .mesh()
+                    .and_then(|m| m.material())
+                    .and_then(|mat| mat.diffuse_texture.clone())
+            }),
+        })));
+
+        shader_program.add_per_instance_uniform(Rc::new(RefCell::new(UniformAdapter {
+            uniform: UniformVec3::new("albedoConst"),
+            extractor: Box::new(|state: &RenderState<T>| {
+                state
+                    .mesh()
+                    .and_then(|m| m.material())
+                    .map(|mat| mat.diffuse_color.truncate())
+                    .unwrap_or(Vector3::new(1.0, 1.0, 1.0)) // fallback white
+            }),
+        })));
+
+        shader_program.add_per_instance_uniform(Rc::new(RefCell::new(UniformAdapter {
+            uniform: UniformBoolean::new("isAlbedoMapped"),
+            extractor: Box::new(|state: &RenderState<T>| {
+                state
+                    .mesh()
+                    .and_then(|m| m.material())
+                    .and_then(|mat| mat.diffuse_texture.as_ref())
+                    .is_some()
             }),
         })));
 
@@ -66,6 +102,8 @@ impl<T: SceneObject + 'static> IRenderer for EntityRenderer<T> {
 
                     for i in 0..mesh_count {
                         render_state = RenderState::new(self, entity, &camera_ref, i);
+                        self.shader_program
+                            .update_per_instance_uniforms(&render_state);
                         model_ref.bind_and_configure(i);
                         model_ref.render(&render_state, i);
                         model_ref.unbind(i);

@@ -14,4 +14,3 @@ pub trait Texture {
     /// Get the underlying OpenGL texture ID
     fn get_id(&self) -> u32;
 }
-

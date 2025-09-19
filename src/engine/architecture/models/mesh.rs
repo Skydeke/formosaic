@@ -39,6 +39,14 @@ impl Mesh {
         ret
     }
 
+    pub fn set_material(&mut self, mat: Material) {
+        self.material = Some(mat);
+    }
+
+    pub fn material(&self) -> Option<&Material> {
+        self.material.as_ref()
+    }
+
     pub fn delete(&mut self, delete_vbos: bool) {
         self.vao.delete(delete_vbos);
     }
