@@ -151,7 +151,7 @@ impl UniformTexture {
         Self {
             name: name.to_string(),
             location: -1,
-            unit: 0,
+            unit: unit,
         }
     }
 }

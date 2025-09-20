@@ -33,6 +33,9 @@ The project uses a **Makefile** for simplified builds and running.
 ### Linux
 
 ```bash
+# Setup Android SDK/NDK Headers to compile against
+make setup-android
+
 # Build and run the desktop version
 make run
 

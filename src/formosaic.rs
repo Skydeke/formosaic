@@ -60,49 +60,6 @@ impl Default for Formosaic {
 impl Application for Formosaic {
     fn on_init(&mut self, context: &mut SceneContext) {
         log::info!("Initializing scene...");
-
-        let positions: [f32; 9] = [
-            -0.5, -0.5, 0.0, // Left
-            0.5, -0.5, 0.0, // Top
-            0.0, 0.5, 0.0, // Right
-        ];
-        let indices: [i32; 3] = [0, 1, 2];
-
-        let mut pos_buffer = DataBuffer::new(VboUsage::StaticDraw);
-        pos_buffer.store_float(0, &positions);
-        let mut indices_buffer = IndexBuffer::new(VboUsage::StaticDraw);
-        indices_buffer.store_int(0, &indices);
-
-        let mut vao = Vao::create();
-        // Position attribute -> VBO 0
-        let pos_attr = Attribute::of(0, 3, DataType::Float, false);
-        vao.load_data_buffer(Rc::new(pos_buffer), &[pos_attr]);
-        vao.load_index_buffer(Rc::new(indices_buffer), true);
-
-        // Calculate centroid
-        let mut sum = Vector3::new(0.0, 0.0, 0.0);
-        let mut count = 0usize;
-
-        for i in (0..positions.len()).step_by(3) {
-            let v = Vector3::new(positions[i], positions[i + 1], positions[i + 2]);
-            sum += v;
-            count += 1;
-        }
-
-        let centroid = if count > 0 {
-            sum / count as f32
-        } else {
-            Vector3::new(0.0, 0.0, 0.0)
-        };
-
-        let mut mesh = Mesh::from_vao(vao);
-        mesh.set_material(Material::new().with_diffuse_color(Vector4::new(0.0, 1.0, 0.0, 0.0)));
-        let model = Rc::new(RefCell::new(SimpleModel::with_centroid(
-            vec![mesh],
-            RenderMode::Triangles,
-            centroid,
-        )));
-
         let path = "models/Cactus/cactus.fbx";
         let cactus_model: Rc<RefCell<SimpleModel>> = ModelLoader::load(path);
 
@@ -131,11 +88,6 @@ impl Application for Formosaic {
                 .set_position(Vector3::new(0.0, c.y, 0.0));
             scene.add_node(triangle.clone());
             self.simple_triangle = Some(triangle);
-
-            let e2 = SimpleEntity::new(model.clone());
-            let triangle2 = Rc::new(RefCell::new(e2));
-            triangle2.borrow_mut().transform_mut().position = Vector3::new(1.0, 0.0, 0.0);
-            scene.add_node(triangle2.clone());
         }
     }
 

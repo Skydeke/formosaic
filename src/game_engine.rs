@@ -292,7 +292,7 @@ impl GameEngine {
         let window_handle = window.window_handle()?.as_raw();
 
         let context_attributes = ContextAttributesBuilder::new()
-            .with_context_api(ContextApi::Gles(Some(glutin::context::Version::new(3, 0))))
+            .with_context_api(ContextApi::Gles(Some(glutin::context::Version::new(3, 1))))
             .build(Some(window_handle));
 
         // Pick config from display

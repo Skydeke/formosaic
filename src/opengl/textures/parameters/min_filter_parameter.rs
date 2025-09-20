@@ -22,9 +22,3 @@ impl MinFilterParameter {
         }
     }
 }
-
-impl TextureParameter for MinFilterParameter {
-    fn get(&self) -> u32 {
-        self.get()
-    }
-}

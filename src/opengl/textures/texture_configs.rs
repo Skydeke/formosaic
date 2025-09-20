@@ -8,6 +8,7 @@ use crate::opengl::{
     },
 };
 
+#[derive(Clone)]
 pub struct TextureConfigs {
     pub internal_format: FormatType,
     pub format: FormatType,
@@ -39,24 +40,10 @@ impl TextureConfigs {
             mipmap: true,
         }
     }
+}
 
-    pub fn default() -> Self {
-        Self::new(FormatType::Rgba16F, FormatType::Rgba, DataType::UByte)
-    }
-
-    pub fn copy(&self) -> Self {
-        Self {
-            internal_format: self.internal_format,
-            format: self.format,
-            data_type: self.data_type,
-            border_colour: self.border_colour.clone(),
-            min_filter: self.min_filter,
-            mag_filter: self.mag_filter,
-            wrap_s: self.wrap_s,
-            wrap_t: self.wrap_t,
-            level_of_detail_bias: self.level_of_detail_bias,
-            anisotropic_filter: self.anisotropic_filter,
-            mipmap: self.mipmap,
-        }
+impl Default for TextureConfigs {
+    fn default() -> Self {
+        Self::new(FormatType::Rgba, FormatType::Rgba, DataType::UByte332)
     }
 }

@@ -14,9 +14,3 @@ impl MagFilterParameter {
         }
     }
 }
-
-impl TextureParameter for MagFilterParameter {
-    fn get(&self) -> u32 {
-        self.get()
-    }
-}
