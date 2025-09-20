@@ -2077,17 +2077,10 @@ dependencies = [
  "num-derive",
  "num-traits",
  "num_enum 0.6.1",
- "russimp-sys 2.0.2 (registry+https://github.com/rust-lang/crates.io-index)",
+ "russimp-sys",
  "strum",
  "strum_macros",
 ]
-
-[[package]]
-name = "russimp-sys"
-version = "2.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d3257f93c651c6b87d6f7a5329bf2079bfcf0fc4e2dc7e9b0f05cb3ba5d3b03b"
-replace = "russimp-sys 2.0.2 (git+https://github.com/jkvargas/russimp-sys.git?tag=v2.0.2)"
 
 [[package]]
 name = "russimp-sys"
