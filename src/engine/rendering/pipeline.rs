@@ -116,10 +116,12 @@ impl Pipeline {
         let mut scene_fbo = &mut SceneFbo::instance().fbo;
         if !scene_fbo.is_sized(width as i32, height as i32) {
             scene_fbo.resize(width as i32, height as i32);
+            log::info!("Resizing SceneFbo.");
         }
         // Resize deferred FBO if resolution changed
         if !self.deferred_fbo.is_sized(width as i32, height as i32) {
             self.deferred_fbo.resize(width as i32, height as i32);
+            log::info!("Resizing deferred FBO.");
         }
 
         // Geometry pass - render to G-buffer
@@ -156,7 +158,7 @@ impl Pipeline {
         // 3. Perform lighting calculations using deferred shading
         // 4. Render final lit scene
 
-        // For now, just blit the result to screen (you'll want to replace this)
+        // Source: your deferred FBO
         self.deferred_fbo.bind(FboTarget::ReadFramebuffer);
         Fbo::blit_framebuffer(
             0,

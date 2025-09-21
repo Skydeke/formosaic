@@ -63,7 +63,7 @@ impl SceneFbo {
         }
     }
 
-    pub fn blit_to_screen(&self) {
+    pub fn blit_to_screen(&mut self) {
         self.fbo.bind(FboTarget::ReadFramebuffer);
 
         Fbo::blit_framebuffer(

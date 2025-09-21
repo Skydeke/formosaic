@@ -209,7 +209,7 @@ impl Fbo {
         self.unbind(FboTarget::Framebuffer);
     }
 
-    pub fn bind(&self, target: FboTarget) {
+    pub fn bind(&mut self, target: FboTarget) {
         unsafe { gl::BindFramebuffer(target.get(), self.id) };
         match target {
             FboTarget::DrawFramebuffer => {
@@ -220,10 +220,7 @@ impl Fbo {
                 self.set_viewport();
             }
             FboTarget::ReadFramebuffer => {
-                // Fix: Create a mutable reference properly
-                let mut temp_fbo = unsafe { std::ptr::read(self) };
-                temp_fbo.read_attachment();
-                std::mem::forget(temp_fbo); // Prevent drop
+                self.read_attachment();
             }
         }
     }
