@@ -37,6 +37,8 @@ pub struct GameEngine {
     gl_initialized: bool,
     last_cursor_pos: (f32, f32),
     last_frame_time: std::time::Instant,
+    fps_accumulator: f32,
+    frame_count: u32,
 }
 
 impl ApplicationHandler for GameEngine {
@@ -87,6 +89,17 @@ impl ApplicationHandler for GameEngine {
                     let now = std::time::Instant::now();
                     let delta_time = (now - self.last_frame_time).as_secs_f32();
                     self.last_frame_time = now;
+
+                    // Update FPS counter
+                    self.fps_accumulator += delta_time;
+                    self.frame_count += 1;
+
+                    if self.fps_accumulator >= 20.0 {
+                        let fps = self.frame_count as f32 / self.fps_accumulator;
+                        log::info!("Formosaic - FPS: {:.1}", fps);
+                        self.fps_accumulator = 0.0;
+                        self.frame_count = 0;
+                    }
 
                     let size = window.inner_size();
                     game.on_update(
@@ -264,6 +277,8 @@ impl GameEngine {
             gl_initialized: false,
             last_cursor_pos: (0.0, 0.0),
             last_frame_time: std::time::Instant::now(),
+            fps_accumulator: 0.0,
+            frame_count: 0,
         }
     }
 

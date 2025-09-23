@@ -41,6 +41,7 @@ impl LightingPass {
         unsafe {
             let albedo_texture_id = deferred_fbo.get_attachments()[0].get_texture().get_id();
             // TODO: I hate hard coding this, we should have the infos in the attachment wrapper.
+            // We should also use our UniformSystem.
             gl::BindImageTexture(
                 0,                 // image unit
                 albedo_texture_id, // texture
