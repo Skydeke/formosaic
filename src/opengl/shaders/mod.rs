@@ -1,3 +1,5 @@
+pub mod compute_program;
+pub mod lighting_pass;
 pub mod render_state;
 pub mod shader;
 pub mod shader_program;

@@ -75,9 +75,10 @@ impl Fbo {
         self.width == width && self.height == height
     }
 
-    pub fn blit_fbo(&self, fbo: &Fbo, filter: MagFilterParameter, buffers: &[GlBuffer]) {
+    pub fn blit_fbo(&mut self, fbo: &mut Fbo, filter: MagFilterParameter, buffers: &[GlBuffer]) {
         self.bind(FboTarget::ReadFramebuffer);
         fbo.bind(FboTarget::DrawFramebuffer);
+
         unsafe {
             gl::BlitFramebuffer(
                 0,
@@ -92,6 +93,9 @@ impl Fbo {
                 filter.get(),
             );
         }
+
+        fbo.unbind(FboTarget::DrawFramebuffer);
+        self.unbind(FboTarget::ReadFramebuffer);
     }
 
     // Add static blit_framebuffer method for scene_fbo.rs compatibility
@@ -174,9 +178,7 @@ impl Fbo {
 
     fn draw_attachments(&self) {
         let draw_attachments = self.get_draw_attachments();
-        if draw_attachments.len() == 1 {
-            unsafe { gl::DrawBuffer(draw_attachments[0].get_attachment_point() as u32) };
-        } else if draw_attachments.len() > 1 {
+        if draw_attachments.len() >= 1 {
             let buffer: Vec<u32> = draw_attachments
                 .iter()
                 .map(|a| a.get_attachment_point() as u32)
@@ -244,11 +246,17 @@ impl Fbo {
     }
 }
 
+impl Drop for Fbo {
+    fn drop(&mut self) {
+        self.delete();
+    }
+}
+
 impl IFbo for Fbo {
-    fn blit_fbo(&self, fbo: &dyn IFbo, filter: MagFilterParameter, buffers: &[GlBuffer]) {
+    fn blit_fbo(&mut self, fbo: &mut dyn IFbo, filter: MagFilterParameter, buffers: &[GlBuffer]) {
         // Convert dyn IFbo to &Fbo for compatibility
-        if let Some(concrete_fbo) = (fbo as &dyn std::any::Any).downcast_ref::<Fbo>() {
-            self.blit_fbo(concrete_fbo, filter, buffers);
+        if let Some(concrete_fbo) = (fbo as &mut dyn std::any::Any).downcast_mut::<Fbo>() {
+            Fbo::blit_fbo(self, concrete_fbo, filter, buffers);
         }
     }
 
@@ -261,18 +269,18 @@ impl IFbo for Fbo {
     }
 
     fn resize(&mut self, width: i32, height: i32) {
-        self.resize(width, height);
+        Fbo::resize(self, width, height);
     }
 
-    fn bind(&self, target: FboTarget) {
-        self.bind(target);
+    fn bind(&mut self, target: FboTarget) {
+        Fbo::bind(self, target);
     }
 
     fn unbind(&self, target: FboTarget) {
-        self.unbind(target);
+        Fbo::unbind(self, target);
     }
 
     fn delete(&mut self) {
-        self.delete();
+        Fbo::delete(self);
     }
 }

@@ -6,6 +6,7 @@ pub enum ShaderType {
     Vertex = gl::VERTEX_SHADER as isize,
     Fragment = gl::FRAGMENT_SHADER as isize,
     Geometry = gl::GEOMETRY_SHADER as isize,
+    Compute = gl::COMPUTE_SHADER as isize,
 }
 
 pub struct Shader {
@@ -48,6 +49,10 @@ impl Shader {
 
     pub fn geometry(source: &str) -> Result<Self, String> {
         Self::new(source, ShaderType::Geometry)
+    }
+
+    pub fn compute(source: &str) -> Result<Self, String> {
+        Self::new(source, ShaderType::Compute)
     }
 
     pub fn id(&self) -> u32 {

@@ -5,18 +5,18 @@ use crate::opengl::{
 use std::any::Any;
 
 pub trait IFbo: Any {
-    fn blit_fbo(&self, fbo: &dyn IFbo, filter: MagFilterParameter, buffers: &[GlBuffer]);
+    fn blit_fbo(&mut self, fbo: &mut dyn IFbo, filter: MagFilterParameter, buffers: &[GlBuffer]);
 
     fn get_width(&self) -> i32;
     fn get_height(&self) -> i32;
     fn resize(&mut self, width: i32, height: i32);
 
-    fn bind(&self, target: FboTarget);
+    fn bind(&mut self, target: FboTarget);
     fn unbind(&self, target: FboTarget);
     fn delete(&mut self);
 
     // Default methods
-    fn blit_to(&self, fbo: &dyn IFbo) {
+    fn blit_to(&mut self, fbo: &mut dyn IFbo) {
         self.blit_fbo(
             fbo,
             MagFilterParameter::Nearest,
@@ -24,7 +24,7 @@ pub trait IFbo: Any {
         );
     }
 
-    fn bind_default(&self) {
+    fn bind_default(&mut self) {
         self.bind(FboTarget::Framebuffer);
     }
 

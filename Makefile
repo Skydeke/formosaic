@@ -34,10 +34,14 @@ ANDROID_EXAMPLE := android
 # Env for all Android commands
 ANDROID_ENV := ANDROID_HOME=$(SDK_DIR) ANDROID_NDK_HOME=$(SDK_DIR)/ndk/25.2.9519653 ANDROID_NDK_ROOT=$(SDK_DIR)/ndk/25.2.9519653 PATH=$(SDK_DIR)/platform-tools:$(CMDLINE_TOOLS)/bin:$(PATH)
 
-.PHONY: linux run debug release linux-build-release \
+.PHONY: fix-warnigns linux run debug release linux-build-release \
         android android-debug android-apk android-apk-release \
         android-release android-all \
         setup-android check-android clean help
+
+fix-warnigns:
+	@echo "Fixing warnings..."
+	$(ANDROID_ENV) cargo fix --lib -p formosaic
 
 # Development run with debug logging
 linux run debug:
