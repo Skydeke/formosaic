@@ -14,6 +14,7 @@ use crate::{
 };
 
 pub struct CameraOnly;
+#[allow(refining_impl_trait)]
 impl Processable for CameraOnly {
     fn get_model(&self) -> &SimpleModel {
         panic!("CameraOnly does not have a model")
@@ -31,13 +32,6 @@ impl LightingPass {
         let src = include_str!("../../../assets/shaders/deferred_lighting.comp.glsl");
         let mut program =
             ComputeProgram::from_source(src).expect("Failed to compile lighting compute shader");
-
-        program.add_uniform(Rc::new(RefCell::new(UniformAdapter {
-            uniform: UniformVec3::new("cameraPos"),
-            extractor: Box::new(|state: &RenderState<CameraOnly>| {
-                state.camera().transform.position
-            }),
-        })));
 
         Self { program }
     }
@@ -123,7 +117,7 @@ impl LightingPass {
 }
 
 impl IRenderer for LightingPass {
-    fn render(&mut self, context: &SceneContext) {}
+    fn render(&mut self, _context: &SceneContext) {}
 
     fn any_processed(&self) -> bool {
         true

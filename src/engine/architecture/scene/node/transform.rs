@@ -1,6 +1,4 @@
-use cgmath::{
-    Deg, InnerSpace, Matrix3, Matrix4, One, Quaternion, Rotation3, Vector3,
-};
+use cgmath::{Deg, InnerSpace, Matrix3, Matrix4, One, Quaternion, Rotation3, Vector3};
 
 #[derive(Clone, Debug)]
 pub struct Transform {
@@ -59,8 +57,7 @@ impl Transform {
     pub fn look_along(&mut self, direction: Vector3<f32>, up: Vector3<f32>) {
         let dir = direction.normalize();
         if dir.magnitude2() > 0.0 {
-            // Right-handed coordinate system: compute orthonormal basis
-            let forward = dir;
+            let forward = -dir;
             let right = up.cross(forward).normalize();
             let real_up = forward.cross(right).normalize();
 

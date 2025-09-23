@@ -121,8 +121,6 @@ impl Texture for SimpleTexture {
 
     fn apply_configs(&self, configs: &TextureConfigs) {
         unsafe {
-            gl::BindTexture(gl::TEXTURE_2D, self.id);
-
             // Filters
             if let Some(mag_filter) = &configs.mag_filter {
                 gl::TexParameteri(
@@ -165,8 +163,6 @@ impl Texture for SimpleTexture {
                     configs.border_colour.as_ptr(),
                 );
             }
-
-            gl::BindTexture(gl::TEXTURE_2D, 0);
         }
     }
 

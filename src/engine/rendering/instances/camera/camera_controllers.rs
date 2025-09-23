@@ -18,4 +18,10 @@ impl CameraController for CameraControllers {
             controller.control(camera);
         }
     }
+
+    fn handle_event(&mut self, event: &crate::input::Event, width: f32, height: f32) {
+        for controller in &mut self.controllers {
+            controller.handle_event(event, width, height);
+        }
+    }
 }

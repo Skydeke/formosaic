@@ -3,7 +3,9 @@ use crate::engine::rendering::abstracted::camera::camera_projection::CameraProje
 use crate::engine::rendering::instances::camera::camera_controller::CameraController;
 use crate::engine::rendering::instances::camera::camera_controller::NoneController;
 use crate::engine::rendering::instances::camera::perspective_projection::PerspectiveProjection;
+use cgmath::Matrix;
 use cgmath::Vector2;
+use cgmath::Vector3;
 use cgmath::{EuclideanSpace, Matrix4, Point3, SquareMatrix};
 
 pub struct Camera {
@@ -15,7 +17,7 @@ pub struct Camera {
     pub far_plane: f32,
     pub fov: f32,
 
-    controller: Box<dyn CameraController>,
+    pub controller: Box<dyn CameraController>,
     projection: Box<dyn CameraProjection>,
 
     pub transform: Transform,
@@ -41,12 +43,17 @@ impl Camera {
     }
 
     pub fn update(&mut self) {
-        // Split the controller update to avoid borrowing issues
-        let mut temp_controller =
+        // Take the controller out temporarily
+        let mut controller =
             std::mem::replace(&mut self.controller, Box::new(NoneController::new()));
-        temp_controller.control(self);
-        self.controller = temp_controller;
 
+        // Now no overlapping borrow: controller owns the Box
+        controller.control(self);
+
+        // Put it back
+        self.controller = controller;
+
+        // Update matrices after the transform changes
         self.update_all_matrices();
     }
 
@@ -72,14 +79,12 @@ impl Camera {
     /* ===== MATRICES ===== */
 
     pub fn update_view_matrix(&mut self) {
-        let forward = self.transform.forward(); // camera looks along -Z
-        let up = self.transform.up(); // rotated up
+        let forward = self.transform.forward();
+        let up = self.transform.up();
+        let eye = self.transform.position;
 
-        self.view_matrix = Matrix4::look_at_rh(
-            Point3::from_vec(self.transform.position),
-            Point3::from_vec(self.transform.position + forward),
-            up,
-        );
+        self.view_matrix =
+            Matrix4::look_at_rh(Point3::from_vec(eye), Point3::from_vec(eye + forward), up);
     }
 
     pub fn update_projection_matrix(&mut self) {
