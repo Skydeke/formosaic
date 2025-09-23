@@ -3,9 +3,7 @@ use crate::engine::rendering::abstracted::camera::camera_projection::CameraProje
 use crate::engine::rendering::instances::camera::camera_controller::CameraController;
 use crate::engine::rendering::instances::camera::camera_controller::NoneController;
 use crate::engine::rendering::instances::camera::perspective_projection::PerspectiveProjection;
-use cgmath::Matrix;
 use cgmath::Vector2;
-use cgmath::Vector3;
 use cgmath::{EuclideanSpace, Matrix4, Point3, SquareMatrix};
 
 pub struct Camera {
@@ -43,15 +41,7 @@ impl Camera {
     }
 
     pub fn update(&mut self) {
-        // Take the controller out temporarily
-        let mut controller =
-            std::mem::replace(&mut self.controller, Box::new(NoneController::new()));
-
-        // Now no overlapping borrow: controller owns the Box
-        controller.control(self);
-
-        // Put it back
-        self.controller = controller;
+        self.controller.control(&mut self.transform);
 
         // Update matrices after the transform changes
         self.update_all_matrices();

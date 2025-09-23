@@ -1,8 +1,8 @@
-use crate::engine::rendering::instances::camera::camera::Camera;
+use crate::engine::architecture::scene::node::transform::Transform;
 
 /// Trait representing a camera controller
 pub trait CameraController {
-    fn control(&mut self, camera: &mut Camera);
+    fn control(&mut self, transform: &mut Transform);
     fn handle_event(&mut self, event: &crate::input::Event, width: f32, height: f32);
 }
 
@@ -16,9 +16,9 @@ impl NoneController {
 }
 
 impl CameraController for NoneController {
-    fn control(&mut self, _camera: &mut Camera) {
+    fn control(&mut self, _transform: &mut Transform) {
         // Do nothing
     }
 
-    fn handle_event(&mut self, event: &crate::input::Event, width: f32, height: f32) {}
+    fn handle_event(&mut self, _event: &crate::input::Event, _width: f32, _height: f32) {}
 }

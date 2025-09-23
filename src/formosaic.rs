@@ -43,11 +43,6 @@ impl Application for Formosaic {
         let path = "models/Cactus/cactus.fbx";
         let cactus_model: Rc<RefCell<SimpleModel>> = ModelLoader::load(path);
 
-        // Set camera position
-        if let Some(camera) = context.camera() {
-            camera.borrow_mut().get_transform_mut().position = Vector3::new(0.0, 0.0, 3.0);
-        }
-
         // Create triangle entity and add to scene
         if let Some(scene) = context.scene() {
             let e1 = SimpleEntity::new(cactus_model.clone());

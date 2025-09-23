@@ -1,5 +1,3 @@
-use std::{cell::RefCell, rc::Rc};
-
 use crate::{
     engine::{
         architecture::{models::simple_model::SimpleModel, scene::scene_context::SceneContext},
@@ -7,9 +5,7 @@ use crate::{
     },
     opengl::{
         fbos::fbo::Fbo,
-        shaders::{
-            compute_program::ComputeProgram, uniform::UniformAdapter, RenderState, UniformVec3,
-        },
+        shaders::{compute_program::ComputeProgram, RenderState},
     },
 };
 
@@ -30,7 +26,7 @@ pub struct LightingPass {
 impl LightingPass {
     pub fn new() -> Self {
         let src = include_str!("../../../assets/shaders/deferred_lighting.comp.glsl");
-        let mut program =
+        let program =
             ComputeProgram::from_source(src).expect("Failed to compile lighting compute shader");
 
         Self { program }

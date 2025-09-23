@@ -1,5 +1,6 @@
-use crate::engine::rendering::instances::camera::{
-    camera::Camera, camera_controller::CameraController,
+use crate::engine::{
+    architecture::scene::node::transform::Transform,
+    rendering::instances::camera::camera_controller::CameraController,
 };
 
 pub struct CameraControllers {
@@ -13,9 +14,9 @@ impl CameraControllers {
 }
 
 impl CameraController for CameraControllers {
-    fn control(&mut self, camera: &mut Camera) {
+    fn control(&mut self, transform: &mut Transform) {
         for controller in &mut self.controllers {
-            controller.control(camera);
+            controller.control(transform);
         }
     }
 

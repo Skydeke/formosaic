@@ -1,8 +1,8 @@
 use crate::engine::{
     architecture::scene::node::transform::Transform,
-    rendering::instances::camera::{camera::Camera, camera_controller::CameraController},
+    rendering::instances::camera::camera_controller::CameraController,
 };
-use cgmath::{InnerSpace, Quaternion, Rad, Rotation, Rotation3, Vector3};
+use cgmath::{InnerSpace, Vector3};
 
 pub struct OrbitController {
     pub target: Vector3<f32>,
@@ -67,41 +67,50 @@ impl OrbitController {
     fn apply_rotation(&mut self, transform: &mut Transform) {
         // Current offset from target
         let mut offset = transform.position - self.target;
-        if offset.magnitude2() < 1e-6 {
+        if offset.magnitude2() < self.distance {
             offset = Vector3::new(0.0, 0.0, self.distance);
         }
 
-        // Rotation quaternions
-        let rot_pitch =
-            Quaternion::from_angle_x(Rad(-self.delta_y * self.sensitivity * std::f32::consts::PI));
+        // Convert offset to spherical coordinates
+        let radius = offset.magnitude();
+        let mut theta = offset.z.atan2(offset.x); // azimuth (yaw)
+        let mut phi = (offset.y / radius).asin(); // elevation (pitch)
 
-        let rot_yaw =
-            Quaternion::from_angle_y(Rad(-self.delta_x * self.sensitivity * std::f32::consts::PI));
+        // Apply accumulated deltas
+        theta += self.delta_x * self.sensitivity * std::f32::consts::PI;
+        phi += self.delta_y * self.sensitivity * std::f32::consts::PI;
 
-        // Apply both rotations
-        let rotation = rot_yaw * rot_pitch;
-        offset = rotation.rotate_vector(offset);
+        // Clamp phi to avoid gimbal flip (just below +/- 90°)
+        let epsilon = 0.001;
+        phi = phi.clamp(
+            -std::f32::consts::FRAC_PI_2 + epsilon,
+            std::f32::consts::FRAC_PI_2 - epsilon,
+        );
 
-        // Keep distance consistent
-        offset = offset.normalize() * self.distance;
+        // Convert back to Cartesian coordinates
+        let x = radius * phi.cos() * theta.cos();
+        let y = radius * phi.sin();
+        let z = radius * phi.cos() * theta.sin();
+        offset = Vector3::new(x, y, z);
 
         // Update camera transform
         transform.position = self.target + offset;
+
+        // Look at target using world up
         transform.look_at(self.target, Vector3::unit_y());
 
-        // reset deltas
+        // Reset deltas
         self.delta_x = 0.0;
         self.delta_y = 0.0;
     }
 }
 
 impl CameraController for OrbitController {
-    fn control(&mut self, camera: &mut Camera) {
-        self.apply_rotation(&mut camera.transform);
+    fn control(&mut self, transform: &mut Transform) {
+        self.apply_rotation(transform);
     }
 
     fn handle_event(&mut self, event: &crate::input::Event, width: f32, height: f32) {
         self.handle_event(event, width, height);
     }
 }
-
