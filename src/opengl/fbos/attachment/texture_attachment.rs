@@ -1,7 +1,5 @@
-use cgmath::Array;
 
 use crate::opengl::{
-    constants::{data_type::DataType, format_type::FormatType},
     fbos::{
         attachment::{
             abstract_attachment::AbstractAttachment, attachment::Attachment,
@@ -10,9 +8,8 @@ use crate::opengl::{
         fbo::Fbo,
         simple_texture::SimpleTexture,
     },
-    textures::{texture::Texture, texture_configs::TextureConfigs, texture_target::TextureTarget},
+    textures::{texture::Texture, texture_configs::TextureConfigs},
 };
-use std::ptr;
 
 pub struct TextureAttachment {
     base: AbstractAttachment,
@@ -22,7 +19,7 @@ pub struct TextureAttachment {
 
 impl TextureAttachment {
     pub fn of_colour(index: i32, configs: TextureConfigs) -> Box<Self> {
-        let mut texture = Box::new(SimpleTexture::create());
+        let texture = Box::new(SimpleTexture::create());
 
         let this = Box::new(Self {
             base: AbstractAttachment::new(AttachmentType::Colour, index),

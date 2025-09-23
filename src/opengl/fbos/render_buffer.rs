@@ -11,7 +11,7 @@ static mut BOUND_RENDERBUFFER: u32 = 0;
 
 impl RenderBuffer {
     fn new(id: u32) -> Self {
-        let mut rb = Self { id, deleted: false };
+        let rb = Self { id, deleted: false };
         rb.bind();
         rb
     }

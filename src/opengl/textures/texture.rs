@@ -1,7 +1,4 @@
-use crate::opengl::{
-    constants::{data_type::DataType, format_type::FormatType},
-    textures::{texture_configs::TextureConfigs, texture_target::TextureTarget},
-};
+use crate::opengl::textures::texture_configs::TextureConfigs;
 use std::any::Any;
 
 pub trait Texture: Any {

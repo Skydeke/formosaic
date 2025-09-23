@@ -1,4 +1,3 @@
-use crate::opengl::textures::parameters::texture_parameter::TextureParameter;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum MinFilterParameter {

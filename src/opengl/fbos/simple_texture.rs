@@ -1,10 +1,7 @@
 use cgmath::Array;
 
-use crate::opengl::{
-    constants::{data_type::DataType, format_type::FormatType},
-    textures::{texture::Texture, texture_configs::TextureConfigs, texture_target::TextureTarget},
-};
-use std::{any::Any, ptr};
+use crate::opengl::textures::{texture::Texture, texture_configs::TextureConfigs};
+use std::any::Any;
 
 #[derive(Debug)]
 pub struct SimpleTexture {

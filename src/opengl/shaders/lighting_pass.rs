@@ -1,15 +1,12 @@
-use std::{cell::RefCell, ffi::CString, rc::Rc};
+use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     engine::{
-        architecture::{
-            models::{model::Model, simple_model::SimpleModel},
-            scene::scene_context::SceneContext,
-        },
+        architecture::{models::simple_model::SimpleModel, scene::scene_context::SceneContext},
         rendering::abstracted::{irenderer::IRenderer, processable::Processable},
     },
     opengl::{
-        fbos::{fbo::Fbo, fbo_target::FboTarget},
+        fbos::fbo::Fbo,
         shaders::{
             compute_program::ComputeProgram, uniform::UniformAdapter, RenderState, UniformVec3,
         },

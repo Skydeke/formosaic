@@ -1,4 +1,3 @@
-use gl;
 
 use crate::opengl::{
     constants::{data_type::DataType, format_type::FormatType, gl_buffer::GlBuffer},

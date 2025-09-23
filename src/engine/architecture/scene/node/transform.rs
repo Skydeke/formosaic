@@ -1,5 +1,5 @@
 use cgmath::{
-    Deg, InnerSpace, Matrix3, Matrix4, One, Quaternion, Rotation3, SquareMatrix, Vector3,
+    Deg, InnerSpace, Matrix3, Matrix4, One, Quaternion, Rotation3, Vector3,
 };
 
 #[derive(Clone, Debug)]

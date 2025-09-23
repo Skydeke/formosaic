@@ -1,25 +1,15 @@
-use cgmath::{Deg, One, Quaternion, Rotation3, Transform, Vector3, Vector4};
+use cgmath::{Deg, One, Quaternion, Rotation3, Vector3};
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     engine::architecture::{
-        models::{
-            material::Material, mesh::Mesh, model::Model, model_loader::ModelLoader,
-            simple_model::SimpleModel,
-        },
+        models::{model_loader::ModelLoader, simple_model::SimpleModel},
         scene::{
-            entity::{scene_object::SceneObject, simple_entity::SimpleEntity},
-            node::node::NodeBehavior,
+            entity::simple_entity::SimpleEntity, node::node::NodeBehavior,
             scene_context::SceneContext,
         },
     },
     input::Event,
-    opengl::{
-        constants::{data_type::DataType, render_mode::RenderMode, vbo_usage::VboUsage},
-        objects::{
-            attribute::Attribute, data_buffer::DataBuffer, index_buffer::IndexBuffer, vao::Vao,
-        },
-    },
     EngineKey as Key,
 };
 
