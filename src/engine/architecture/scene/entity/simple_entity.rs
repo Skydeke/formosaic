@@ -17,7 +17,6 @@ pub struct SimpleEntity {
     debug_name: Option<String>,
     children: Vec<Rc<RefCell<dyn NodeBehavior>>>,
     transform: Transform,
-
     // SceneObject-specific properties
     model: Rc<RefCell<SimpleModel>>,
 }
@@ -35,11 +34,10 @@ impl SimpleEntity {
     }
 
     pub fn centroid(&self) -> Vector3<f32> {
-        let centroid = self.model.borrow().centroid().unwrap(); // Vector3<f32>
+        let centroid = self.model.borrow().centroid().unwrap();
         let centroid4 = Vector4::new(centroid.x, centroid.y, centroid.z, 1.0);
-
         let world_centroid4 = self.transform.get_matrix() * centroid4;
-        let world_centroid = world_centroid4.truncate(); // back to Vector3<f32>
+        let world_centroid = world_centroid4.truncate();
         world_centroid
     }
 }
@@ -74,7 +72,12 @@ impl NodeBehavior for SimpleEntity {
         &mut self.transform
     }
 
-    fn update(&mut self) {}
+    fn update(&mut self) {
+        // Update all children recursively
+        for child in &self.children {
+            child.borrow_mut().update();
+        }
+    }
 
     fn process(&mut self) {}
 
@@ -85,7 +88,18 @@ impl NodeBehavior for SimpleEntity {
 
 // Implement NodeChildren
 impl NodeChildren for SimpleEntity {
-    fn add_child_impl(&mut self, child: Rc<RefCell<dyn NodeBehavior>>) {
+    fn add_child_impl(
+        &mut self,
+        parent: Rc<RefCell<dyn NodeBehavior>>,
+        child: Rc<RefCell<dyn NodeBehavior>>,
+    ) {
+        // Set this node as the parent of the child
+        child
+            .borrow_mut()
+            .transform_mut()
+            .set_parent(Some(Rc::downgrade(&parent)));
+
+        // Add to children list
         self.children.push(child);
     }
 
@@ -100,7 +114,7 @@ impl Processable for SimpleEntity {
 
     fn get_model(&self) -> &impl Model {
         unsafe { &*(self.model.as_ref().as_ptr()) }
-        // TODO:  ⚠️ This is unsafe and not recommended!
+        // TODO: ⚠️ This is unsafe and not recommended!
     }
 }
 

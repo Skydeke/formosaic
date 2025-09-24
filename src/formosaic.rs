@@ -1,4 +1,4 @@
-use cgmath::{One, Quaternion, Vector3};
+use cgmath::Vector3;
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
@@ -6,7 +6,8 @@ use crate::{
         architecture::{
             models::{model_loader::ModelLoader, simple_model::SimpleModel},
             scene::{
-                entity::simple_entity::SimpleEntity, node::node::NodeBehavior,
+                entity::simple_entity::SimpleEntity,
+                node::node::{NodeBehavior, NodeChildren},
                 scene_context::SceneContext,
             },
         },
@@ -23,11 +24,12 @@ pub trait Application {
 
 pub struct Formosaic {
     time: f32,
+    t: Option<Rc<RefCell<SimpleEntity>>>,
 }
 
 impl Formosaic {
     pub fn new() -> Self {
-        Self { time: 0.0 }
+        Self { time: 0.0, t: None }
     }
 }
 
@@ -50,7 +52,7 @@ impl Application for Formosaic {
             triangle
                 .borrow_mut()
                 .transform_mut()
-                .set_rotation(Quaternion::one());
+                .add_rotation_euler_world(0.0, 180.0, 0.0);
             triangle
                 .borrow_mut()
                 .transform_mut()
@@ -58,13 +60,49 @@ impl Application for Formosaic {
             triangle
                 .borrow_mut()
                 .transform_mut()
-                .set_position(Vector3::new(0.0, 0.0, 0.0));
+                .set_position(Vector3::new(1.0, 0.0, 0.0));
             scene.add_node(triangle.clone());
+            self.t = Some(triangle.clone());
+
+            let e2 = SimpleEntity::new(cactus_model.clone());
+            let triangle2 = Rc::new(RefCell::new(e2));
+            triangle2
+                .borrow_mut()
+                .transform_mut()
+                .add_rotation_euler_world(0.0, -90.0, 0.0);
+            triangle2
+                .borrow_mut()
+                .transform_mut()
+                .set_scale(Vector3::new(1.0, 1.0, 1.0));
+            triangle2
+                .borrow_mut()
+                .transform_mut()
+                .set_position(Vector3::new(1.0, -1.0, 0.0));
+            triangle
+                .borrow_mut()
+                .add_child_impl(triangle.clone(), triangle2.clone());
+
+            let e3 = SimpleEntity::new(cactus_model.clone());
+            let triangle3 = Rc::new(RefCell::new(e3));
+            triangle3
+                .borrow_mut()
+                .transform_mut()
+                .add_rotation_euler_world(0.0, 90.0, 0.0);
+            triangle3
+                .borrow_mut()
+                .transform_mut()
+                .set_scale(Vector3::new(1.0, 1.0, 1.0));
+            triangle3
+                .borrow_mut()
+                .transform_mut()
+                .set_position(Vector3::new(1.0, -1.0, 0.0));
+            triangle2
+                .borrow_mut()
+                .add_child_impl(triangle2.clone(), triangle3.clone());
 
             if let Some(camera) = context.camera() {
-                let centeroid = triangle.borrow_mut().centroid();
-                let c = triangle.borrow_mut().transform_mut().position + centeroid;
-                let orbit_controller = Box::new(OrbitController::new(c, 3.0));
+                let centeroid = triangle.borrow().centroid();
+                let orbit_controller = Box::new(OrbitController::new(centeroid, 3.0));
                 camera.borrow_mut().set_controller(Some(orbit_controller));
             }
         }
@@ -72,6 +110,13 @@ impl Application for Formosaic {
 
     fn on_update(&mut self, delta_time: f32, _context: &mut SceneContext) {
         self.time += delta_time;
+
+        self.t
+            .as_mut()
+            .expect("Nothing.")
+            .borrow_mut()
+            .transform_mut()
+            .add_rotation_euler_world(0.0, 90.0 * delta_time, 0.0);
     }
 
     fn on_event(&mut self, event: &Event, context: &mut SceneContext) {

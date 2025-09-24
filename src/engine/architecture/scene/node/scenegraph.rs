@@ -18,7 +18,9 @@ impl Scenegraph {
     pub fn add_node(&self, node: Rc<RefCell<dyn NodeBehavior>>) {
         // Cast root to NodeBehavior for consistent interface
         let root_as_behavior: Rc<RefCell<dyn NodeBehavior>> = self.root.clone();
-        Node::add_child(&root_as_behavior, node);
+        root_as_behavior
+            .borrow_mut()
+            .add_child_impl(root_as_behavior.clone(), node);
     }
 
     pub fn update(&mut self) {

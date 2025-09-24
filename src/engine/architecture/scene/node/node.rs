@@ -39,12 +39,6 @@ impl Node {
         }
     }
 
-    pub fn add_child(parent: &Rc<RefCell<dyn NodeBehavior>>, child: Rc<RefCell<dyn NodeBehavior>>) {
-        // Set parent relationship
-        // Note: This is tricky with the current design, you may need to add a set_parent method to NodeBehavior
-        parent.borrow_mut().add_child_impl(child);
-    }
-
     pub fn collect_all(node: &Rc<RefCell<dyn NodeBehavior>>) -> Vec<Rc<RefCell<dyn NodeBehavior>>> {
         let mut ret = vec![Rc::clone(node)];
         ret.extend(node.borrow().get_children_impl());
@@ -125,12 +119,27 @@ impl NodeBehavior for Node {
 
 // Extension trait for managing children - needs to be implemented by NodeBehavior implementors
 pub trait NodeChildren {
-    fn add_child_impl(&mut self, child: Rc<RefCell<dyn NodeBehavior>>);
+    fn add_child_impl(
+        &mut self,
+        parent: Rc<RefCell<dyn NodeBehavior>>,
+        child: Rc<RefCell<dyn NodeBehavior>>,
+    );
     fn get_children_impl(&self) -> Vec<Rc<RefCell<dyn NodeBehavior>>>;
 }
 
 impl NodeChildren for Node {
-    fn add_child_impl(&mut self, child: Rc<RefCell<dyn NodeBehavior>>) {
+    fn add_child_impl(
+        &mut self,
+        parent: Rc<RefCell<dyn NodeBehavior>>,
+        child: Rc<RefCell<dyn NodeBehavior>>,
+    ) {
+        // Set this node as the parent of the child
+        child
+            .borrow_mut()
+            .transform_mut()
+            .set_parent(Some(Rc::downgrade(&parent)));
+
+        // Add to children list
         self.children.push(child);
     }
 
