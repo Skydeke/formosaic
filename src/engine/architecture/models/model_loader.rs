@@ -205,6 +205,7 @@ impl ModelLoader {
 
         // ---- Buffers ----
         let mut pos_buffer = DataBuffer::new(VboUsage::StaticDraw);
+        pos_buffer.allocate_float(positions.len());
         pos_buffer.store_float(0, &positions);
 
         let mut vao = Vao::create();
@@ -213,6 +214,7 @@ impl ModelLoader {
 
         if !texcoords.is_empty() {
             let mut tex_buffer = DataBuffer::new(VboUsage::StaticDraw);
+            tex_buffer.allocate_float(texcoords.len());
             tex_buffer.store_float(0, &texcoords);
             let tex_attr = Attribute::of(1, 2, DataType::Float, false);
             vao.load_data_buffer(Rc::new(tex_buffer), &[tex_attr]);
@@ -220,12 +222,14 @@ impl ModelLoader {
 
         if !normals.is_empty() {
             let mut normal_buffer = DataBuffer::new(VboUsage::StaticDraw);
+            normal_buffer.allocate_float(normals.len());
             normal_buffer.store_float(0, &normals);
             let normal_attr = Attribute::of(2, 3, DataType::Float, false);
             vao.load_data_buffer(Rc::new(normal_buffer), &[normal_attr]);
         }
 
         let mut indices_buffer = IndexBuffer::new(VboUsage::StaticDraw);
+        indices_buffer.allocate_int(indices.len());
         indices_buffer.store_int(0, &indices);
         vao.load_index_buffer(Rc::new(indices_buffer), true);
 
