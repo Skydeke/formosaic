@@ -20,6 +20,7 @@ use winit::event::{ElementState, MouseButton, WindowEvent};
 use winit::raw_window_handle::HasWindowHandle;
 use winit::window::{Window, WindowAttributes, WindowId};
 
+use crate::engine::architecture::models::model_cache::ModelCache;
 use crate::engine::architecture::scene::scene_context::SceneContext;
 use crate::engine::rendering::pipeline::Pipeline;
 use crate::formosaic::Application;
@@ -370,6 +371,8 @@ impl GameEngine {
         self.game = None;
         self.gl_context = None;
         self.gl_surface = None;
+        // Models are remoced from Memory when OpenGL is destroyed
+        ModelCache::clear();
         // Keep display + window alive!
     }
 

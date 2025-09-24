@@ -8,6 +8,7 @@ use russimp::scene::{PostProcess, Scene};
 
 use crate::engine::architecture::models::material::Material;
 use crate::engine::architecture::models::mesh::Mesh;
+use crate::engine::architecture::models::model_cache::ModelCache;
 use crate::engine::architecture::models::simple_model::SimpleModel;
 use crate::opengl::constants::data_type::DataType;
 use crate::opengl::constants::render_mode::RenderMode;
@@ -23,10 +24,18 @@ pub struct ModelLoader;
 impl ModelLoader {
     /// Load a model from a path (Linux: filesystem, Android: APK assets)
     pub fn load(path: &str) -> Rc<RefCell<SimpleModel>> {
-        // Load raw bytes cross-platform
+        if let Some(model) = ModelCache::get(path) {
+            return model;
+        }
+
+        // Not cached → load as before
         let bytes = Self::load_asset_bytes(path);
 
-        // Load the model from memory
+        let extension = std::path::Path::new(path)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("obj");
+
         let scene = Scene::from_buffer(
             &bytes,
             vec![
@@ -38,9 +47,9 @@ impl ModelLoader {
                 PostProcess::PreTransformVertices,
                 PostProcess::EmbedTextures,
             ],
-            "fbx",
+            extension,
         )
-        .expect(&format!("Failed to load model '{}'", path));
+        .unwrap_or_else(|_| panic!("Failed to load model '{}'", path));
 
         let mut sum = Vector3::new(0.0, 0.0, 0.0);
         let mut count = 0usize;
@@ -74,11 +83,15 @@ impl ModelLoader {
             Vector3::new(0.0, 0.0, 0.0)
         };
 
-        Rc::new(RefCell::new(SimpleModel::with_centroid(
+        let model = Rc::new(RefCell::new(SimpleModel::with_centroid(
             meshes,
             RenderMode::Triangles,
             centroid,
-        )))
+        )));
+
+        // Insert into cache
+        ModelCache::insert(path.to_string(), model.clone());
+        model
     }
 
     #[cfg(target_os = "android")]
