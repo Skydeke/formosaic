@@ -64,42 +64,6 @@ impl Application for Formosaic {
             scene.add_node(triangle.clone());
             self.t = Some(triangle.clone());
 
-            let e2 = SimpleEntity::new(cactus_model.clone());
-            let triangle2 = Rc::new(RefCell::new(e2));
-            triangle2
-                .borrow_mut()
-                .transform_mut()
-                .add_rotation_euler_world(0.0, -90.0, 0.0);
-            triangle2
-                .borrow_mut()
-                .transform_mut()
-                .set_scale(Vector3::new(1.0, 1.0, 1.0));
-            triangle2
-                .borrow_mut()
-                .transform_mut()
-                .set_position(Vector3::new(1.0, -1.0, 0.0));
-            triangle
-                .borrow_mut()
-                .add_child_impl(triangle.clone(), triangle2.clone());
-
-            let e3 = SimpleEntity::new(cactus_model.clone());
-            let triangle3 = Rc::new(RefCell::new(e3));
-            triangle3
-                .borrow_mut()
-                .transform_mut()
-                .add_rotation_euler_world(0.0, 90.0, 0.0);
-            triangle3
-                .borrow_mut()
-                .transform_mut()
-                .set_scale(Vector3::new(1.0, 1.0, 1.0));
-            triangle3
-                .borrow_mut()
-                .transform_mut()
-                .set_position(Vector3::new(1.0, -1.0, 0.0));
-            triangle2
-                .borrow_mut()
-                .add_child_impl(triangle2.clone(), triangle3.clone());
-
             if let Some(camera) = context.camera() {
                 let centeroid = triangle.borrow().centroid();
                 let orbit_controller = Box::new(OrbitController::new(centeroid, 3.0));
