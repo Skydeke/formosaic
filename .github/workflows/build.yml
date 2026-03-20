@@ -24,7 +24,7 @@ jobs:
         run: make setup-android
 
       - name: Build Linux release
-        run: make linux-build-release
+        run: make build-release
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
@@ -54,10 +54,10 @@ jobs:
         run: echo "$ANDROID_KEYSTORE_B64" | base64 -d > release.keystore
 
       - name: Build APK (debug)
-        run: make android-apk
+        run: make android-build
 
       - name: Build APK (release)
-        run: make android-apk-release
+        run: make android-release-build
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4

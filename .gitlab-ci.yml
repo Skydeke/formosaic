@@ -10,7 +10,7 @@ linux_release:
   script:
     - apt-get update && apt-get install -y --no-install-recommends curl unzip openjdk-21-jdk-headless ca-certificates pkg-config libssl-dev build-essential cmake clang libclang-dev
     - make setup-android
-    - make linux-build-release
+    - make build-release
   artifacts:
     name: "linux-desktop-release"
     paths:
@@ -30,8 +30,8 @@ android_apk:
   script:
     - make setup-android
     - echo "$ANDROID_KEYSTORE_B64" | base64 -d > release.keystore
-    - make android-apk
-    - make android-apk-release
+    - make android-build
+    - make android-release-build
   artifacts:
     name: "android-apks"
     paths:
