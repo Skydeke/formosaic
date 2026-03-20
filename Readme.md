@@ -1,6 +1,6 @@
 # Formosaic
 
-**Formosaic** (from *Form + Mosaic*) is a simple OpenGL ES game written in Rust, designed to help you learn Rust and graphics programming while having fun.  
+**Formosaic** (from *Form + Mosaic*) is a simple OpenGL ES game written in Rust, designed to help me learn Rust and graphics programming while having fun.  
 In the game, your goal is to find the correct viewing angle to assemble low-poly artwork fragments into a complete image.
 
 ---
