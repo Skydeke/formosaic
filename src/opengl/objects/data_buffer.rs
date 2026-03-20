@@ -55,6 +55,13 @@ impl DataBuffer {
         self.vbo.borrow_mut().store_data(pointer, data);
     }
 
+    /// Update float data through a shared reference (no &mut self needed).
+    /// This enables `Rc<DataBuffer>` to be held by both the VAO and the caller
+    /// for later re-uploads (e.g. scramble), without raw GL calls.
+    pub fn store_float_shared(&self, pointer: usize, data: &[f32]) {
+        self.vbo.borrow_mut().store_float(pointer, data);
+    }
+
     pub fn map(&self, access: VboAccess) -> *mut u8 {
         self.vbo.borrow().map(access)
     }

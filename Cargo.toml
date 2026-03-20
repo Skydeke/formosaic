@@ -12,12 +12,9 @@ wgl = ["glutin-winit/wgl"]
 x11 = ["glutin-winit/x11"]
 wayland = ["glutin-winit/wayland", "winit/wayland-dlopen", "winit/wayland-csd-adwaita"]
 
-[patch.crates-io]
-russimp-sys = { git = "https://github.com/jkvargas/russimp-sys.git", tag = "v2.0.2" }
-
 [dependencies]
 gl = "0.14"
-russimp = { version = "3.2.0", features = ["static-link"] }
+russimp-ng = { git = "https://github.com/Kek5chen/russimp-ng.git", features = ["static-link"] }
 cgmath = "0.18"
 log = "0.4"
 env_logger = "0.10"

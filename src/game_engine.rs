@@ -190,6 +190,8 @@ impl ApplicationHandler for GameEngine {
                         Key::Named(NamedKey::Escape) => EngineKey::Escape,
                         Key::Character(ref s) if s.as_str() == "r" => EngineKey::R,
                         Key::Character(ref s) if s.as_str() == "n" => EngineKey::N,
+                        Key::Character(ref s) if s.as_str() == "k" => EngineKey::K,
+                        Key::Character(ref s) if s.as_str() == "l" => EngineKey::L,
                         Key::Named(NamedKey::Space) => EngineKey::Space,
                         _ => EngineKey::Other,
                     };

@@ -6,6 +6,7 @@ pub mod formosaic;
 pub mod game_engine;
 pub mod input;
 pub mod opengl;
+pub mod puzzle;
 
 pub use formosaic::Formosaic;
 pub use input::{Event as EngineEvent, Key as EngineKey};

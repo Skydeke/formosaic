@@ -32,6 +32,31 @@ impl OrbitController {
         }
     }
 
+    /// Tell the controller the camera's starting world position.
+    ///
+    /// `apply_rotation` derives theta/phi by reading `transform.position`
+    /// directly on every call, so we only need to store the orbit radius here.
+    /// Writing anything into `delta_x/delta_y` would cause the starting angle
+    /// to be applied *twice* on the first frame, producing a visible jump.
+    /// The caller must set `transform.position` to `world_pos` before the first
+    /// `control()` call so `apply_rotation` reads the right starting angles.
+    pub fn set_initial_position(&mut self, world_pos: Vector3<f32>) {
+        let offset = world_pos - self.target;
+        self.distance = offset.magnitude().max(0.001);
+        self.delta_x = 0.0;
+        self.delta_y = 0.0;
+    }
+
+    /// Instantly place the camera so it looks along `dir` (dir = FROM camera TOWARD target).
+    /// Clears pending deltas so the snap sticks on the next control() call.
+    pub fn snap_to_direction(&mut self, transform: &mut Transform, dir: Vector3<f32>) {
+        let d = dir.normalize();
+        transform.position = self.target - d * self.distance;
+        transform.look_at(self.target, Vector3::unit_y());
+        self.delta_x = 0.0;
+        self.delta_y = 0.0;
+    }
+
     pub fn handle_event(&mut self, event: &crate::input::Event, width: f32, height: f32) {
         match event {
             crate::input::Event::MouseDown { x, y, .. }

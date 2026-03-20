@@ -2,21 +2,15 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use cgmath::{Vector3, Vector4};
-use russimp::material::Material as AiMaterial;
-use russimp::mesh::Mesh as AiMesh;
-use russimp::scene::{PostProcess, Scene};
+use russimp_ng::material::Material as AiMaterial;
+use russimp_ng::mesh::Mesh as AiMesh;
+use russimp_ng::scene::{PostProcess, Scene};
 
 use crate::engine::architecture::models::material::Material;
 use crate::engine::architecture::models::mesh::Mesh;
 use crate::engine::architecture::models::model_cache::ModelCache;
 use crate::engine::architecture::models::simple_model::SimpleModel;
-use crate::opengl::constants::data_type::DataType;
 use crate::opengl::constants::render_mode::RenderMode;
-use crate::opengl::constants::vbo_usage::VboUsage;
-use crate::opengl::objects::attribute::Attribute;
-use crate::opengl::objects::data_buffer::DataBuffer;
-use crate::opengl::objects::index_buffer::IndexBuffer;
-use crate::opengl::objects::vao::Vao;
 
 /// Cross-platform model loader
 pub struct ModelLoader;
@@ -199,41 +193,11 @@ impl ModelLoader {
         // indices
         for f in &ai_mesh.faces {
             for idx in &f.0 {
-                indices.push(*idx as i32);
+                indices.push(*idx as u32);
             }
         }
 
-        // ---- Buffers ----
-        let mut pos_buffer = DataBuffer::new(VboUsage::StaticDraw);
-        pos_buffer.allocate_float(positions.len());
-        pos_buffer.store_float(0, &positions);
-
-        let mut vao = Vao::create();
-        let pos_attr = Attribute::of(0, 3, DataType::Float, false);
-        vao.load_data_buffer(Rc::new(pos_buffer), &[pos_attr]);
-
-        if !texcoords.is_empty() {
-            let mut tex_buffer = DataBuffer::new(VboUsage::StaticDraw);
-            tex_buffer.allocate_float(texcoords.len());
-            tex_buffer.store_float(0, &texcoords);
-            let tex_attr = Attribute::of(1, 2, DataType::Float, false);
-            vao.load_data_buffer(Rc::new(tex_buffer), &[tex_attr]);
-        }
-
-        if !normals.is_empty() {
-            let mut normal_buffer = DataBuffer::new(VboUsage::StaticDraw);
-            normal_buffer.allocate_float(normals.len());
-            normal_buffer.store_float(0, &normals);
-            let normal_attr = Attribute::of(2, 3, DataType::Float, false);
-            vao.load_data_buffer(Rc::new(normal_buffer), &[normal_attr]);
-        }
-
-        let mut indices_buffer = IndexBuffer::new(VboUsage::StaticDraw);
-        indices_buffer.allocate_int(indices.len());
-        indices_buffer.store_int(0, &indices);
-        vao.load_index_buffer(Rc::new(indices_buffer), true);
-
-        Mesh::from_vao(vao)
+        Mesh::from_raw(positions, normals, texcoords, indices)
     }
 
     fn process_material(ai_material: &AiMaterial) -> Material {
@@ -242,14 +206,14 @@ impl ModelLoader {
         for prop in &ai_material.properties {
             match prop.key.as_str() {
                 "$clr.diffuse" => {
-                    if let russimp::material::PropertyTypeInfo::FloatArray(values) = &prop.data {
+                    if let russimp_ng::material::PropertyTypeInfo::FloatArray(values) = &prop.data {
                         if values.len() >= 3 {
                             mat.diffuse_color = Vector4::new(values[0], values[1], values[2], 1.0);
                         }
                     }
                 }
                 "$clr.specular" => {
-                    if let russimp::material::PropertyTypeInfo::FloatArray(values) = &prop.data {
+                    if let russimp_ng::material::PropertyTypeInfo::FloatArray(values) = &prop.data {
                         if values.len() >= 3 {
                             mat.specular_color = Vector4::new(values[0], values[1], values[2], 1.0);
                         }
