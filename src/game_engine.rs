@@ -111,10 +111,60 @@ impl ApplicationHandler for GameEngine {
                             .expect("No scene context.")
                             .borrow_mut(),
                     );
+
+                    // Build hint frame data from pre-computed game state.
+                    // game.on_update() already called hints.update() exactly once — we read the cache.
+                    let hint = {
+                        // Ramp glow intensity up after solve.
+                        let glow = if game.is_solved() {
+                            (game.elapsed_secs() * 0.5).min(1.0)
+                        } else {
+                            0.0
+                        };
+
+                        // Menu data
+                        let show_menu   = game.is_in_menu();
+                        let menu_panel  = game.menu_panel();
+                        let levels      = game.saved_levels().to_vec();
+                        let sel         = game.selected_level_idx();
+
+                        if let Some(o) = game.last_hint_output() {
+                            crate::engine::rendering::pipeline::HintFrameData {
+                                warmth:         o.warmth,
+                                warmth_color:   o.warmth_color,
+                                hint_tier:      o.tier.as_u8(),
+                                show_disc:      o.show_disc,
+                                disc_normal:    o.disc_normal,
+                                disc_center:    cgmath::Vector3::new(0.0_f32, 0.0, 0.0),
+                                disc_radius:    1.5,
+                                solved:         game.is_solved(),
+                                glow_intensity: glow,
+                                time:           game.elapsed_secs(),
+                                show_menu,
+                                menu_panel,
+                                levels,
+                                selected_level: sel,
+                                is_downloading: game.is_downloading(),
+                            }
+                        } else {
+                            crate::engine::rendering::pipeline::HintFrameData {
+                                solved:         game.is_solved(),
+                                glow_intensity: glow,
+                                time:           game.elapsed_secs(),
+                                show_menu,
+                                menu_panel,
+                                levels,
+                                selected_level: sel,
+                                is_downloading: game.is_downloading(),
+                                ..Default::default()
+                            }
+                        }
+                    };
+
                     self.pipeline
                         .as_mut()
                         .unwrap()
-                        .draw(size.width, size.height);
+                        .draw(size.width, size.height, &hint);
 
                     let err = unsafe { gl::GetError() };
                     if err != gl::NO_ERROR {
@@ -189,6 +239,7 @@ impl ApplicationHandler for GameEngine {
                     let key = match event.logical_key {
                         Key::Named(NamedKey::Escape) => EngineKey::Escape,
                         Key::Character(ref s) if s.as_str() == "r" => EngineKey::R,
+                        Key::Character(ref s) if s.as_str() == "h" => EngineKey::H,
                         Key::Character(ref s) if s.as_str() == "n" => EngineKey::N,
                         Key::Character(ref s) if s.as_str() == "k" => EngineKey::K,
                         Key::Character(ref s) if s.as_str() == "l" => EngineKey::L,

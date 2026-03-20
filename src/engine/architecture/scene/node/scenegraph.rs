@@ -23,6 +23,16 @@ impl Scenegraph {
             .add_child_impl(root_as_behavior.clone(), node);
     }
 
+    /// Remove all child nodes from the scene graph root.
+    pub fn clear(&self) {
+        // Replace the root's children with an empty list by re-creating the root.
+        // We can't clear children directly as `NodeChildren` only provides add + get,
+        // so we replace the inner Node via interior mutability.
+        use crate::engine::architecture::scene::node::node::Node;
+        let new_root = Node::new();
+        *self.root.borrow_mut() = new_root;
+    }
+
     pub fn update(&mut self) {
         let root_as_behavior: Rc<RefCell<dyn NodeBehavior>> = self.root.clone();
         Node::update_all(&root_as_behavior);

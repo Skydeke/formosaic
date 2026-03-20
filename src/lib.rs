@@ -5,6 +5,7 @@ pub mod engine;
 pub mod formosaic;
 pub mod game_engine;
 pub mod input;
+pub mod level;
 pub mod opengl;
 pub mod puzzle;
 

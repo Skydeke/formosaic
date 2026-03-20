@@ -127,6 +127,12 @@ pub trait NodeChildren {
     fn get_children_impl(&self) -> Vec<Rc<RefCell<dyn NodeBehavior>>>;
 }
 
+impl Default for Node {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl NodeChildren for Node {
     fn add_child_impl(
         &mut self,

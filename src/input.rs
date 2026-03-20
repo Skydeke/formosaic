@@ -1,6 +1,7 @@
 #[derive(Clone, Copy, Debug)]
 pub enum Key {
     Escape,
+    H,
     R,
     N,
     K,
