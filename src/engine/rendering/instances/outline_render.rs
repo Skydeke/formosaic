@@ -76,17 +76,29 @@ impl IRenderer for OutlineRenderer {
         let camera   = context.get_camera();
         let scene    = match context.scene() { Some(s) => s, None => return };
         let nodes    = scene.collect_nodes_of_type::<SimpleEntity>();
-        if nodes.is_empty() { return; }
+        if nodes.is_empty() {
+            unsafe {
+                gl::EnableVertexAttribArray(1);
+                gl::CullFace(gl::BACK);
+                gl::DepthMask(gl::TRUE);
+                gl::Disable(gl::BLEND);
+            }
+            self.shader.unbind();
+            return;
+        }
 
         // Outline technique: extrude back-faces so only the shell is visible.
         // We save/restore cull state so the pipeline is left clean.
         unsafe {
             gl::Enable(gl::DEPTH_TEST);
-            gl::DepthMask(gl::FALSE);          // don't write depth for the shell
+            gl::DepthMask(gl::FALSE);
             gl::Enable(gl::CULL_FACE);
-            gl::CullFace(gl::FRONT);           // draw only back-faces (the extruded shell)
+            gl::CullFace(gl::FRONT);
             gl::Enable(gl::BLEND);
             gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
+            // Outline shader only uses attrib locations 0 (pos) and 2 (norm).
+            // Disable location 1 (uv) so strict GLES drivers don't reject the draw.
+            gl::DisableVertexAttribArray(1);
         }
 
         self.shader.bind();
@@ -137,7 +149,8 @@ impl IRenderer for OutlineRenderer {
         self.shader.unbind();
 
         unsafe {
-            gl::CullFace(gl::BACK);   // restore normal culling
+            gl::EnableVertexAttribArray(1);  // restore uv attrib
+            gl::CullFace(gl::BACK);
             gl::DepthMask(gl::TRUE);
             gl::Disable(gl::BLEND);
         }

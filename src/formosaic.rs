@@ -221,8 +221,10 @@ impl Formosaic {
 
     fn fetch_online_level(&mut self) {
         if !self.client.is_explore_pending() {
+            // Use a small random offset so we get variety, but stay near the
+            // beginning where free CC-BY models are most plentiful
             use rand::Rng;
-            let offset = rand::rng().random_range(0usize..200);
+            let offset = rand::rng().random_range(0usize..50);
             self.client.fetch_explore_page(offset, 20);
             log::info!("[Formosaic] Fetching poly.pizza page at offset {}", offset);
         }

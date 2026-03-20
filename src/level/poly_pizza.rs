@@ -1,7 +1,7 @@
 //! Poly Pizza API client using ureq.
 //!
 //! Based on the API used by <https://github.com/Chikanz/pizzabox>.
-//! Explore endpoint:  GET https://poly.pizza/api/search/any?take=N&skip=O
+//! Explore endpoint:  GET https://poly.pizza/api/search/explore?take=N&skip=O
 //! Model detail:      GET https://poly.pizza/api/m/{id}
 //!
 //! Network calls run on a background thread so the render loop never blocks.
@@ -155,7 +155,7 @@ fn fetch_explore(offset: usize, limit: usize) -> ExploreResult {
     log::info!("[PolyPizza] GET {}", url);
     let body = get_string(&url)?;
     log::debug!(
-        "[PolyPizza] explore response (first 400 chars): {:.400}",
+        "[PolyPizza] explore response (first 1200 chars): {:.1200}",
         body
     );
     parse_explore(&body)
@@ -163,10 +163,40 @@ fn fetch_explore(offset: usize, limit: usize) -> ExploreResult {
 }
 
 fn do_download(id: &str, name: &str, author: &str, license: &str, src: &str) -> DownloadResult {
-    let url = format!("{}/m/{}", API_BASE, id);
-    log::info!("[PolyPizza] GET model info: {}", url);
-    let body = get_string(&url)?;
-    log::debug!("[PolyPizza] model info (first 400 chars): {:.400}", body);
+    // Poly Pizza model detail endpoints to try (undocumented API)
+    // /api/search/explore gives metadata only; detail page needed for download URL
+    let candidates = vec![
+        format!("{}/search/{}", API_BASE, id), // most likely REST pattern
+        format!("{}/search/model/{}", API_BASE, id), // alternative
+        format!("{}/search?id={}", API_BASE, id), // query param style
+        format!("https://poly.pizza/api/{}", id), // minimal path
+    ];
+
+    let mut body = String::new();
+    for url in &candidates {
+        log::info!("[PolyPizza] GET model info: {}", url);
+        match get_string(url) {
+            Ok(b) => {
+                log::debug!("[PolyPizza] response: {:.1200}", b);
+                // Accept if it contains asset/download info
+                if b.contains("glb")
+                    || b.contains("fbx")
+                    || b.contains("Assets")
+                    || b.contains("assets")
+                {
+                    body = b;
+                    break;
+                }
+                if body.is_empty() {
+                    body = b;
+                } // keep as fallback
+            }
+            Err(e) => log::debug!("[PolyPizza] {} -> {}", url, e),
+        }
+    }
+    if body.is_empty() {
+        return Err(format!("[PolyPizza] no model info for '{}'", id));
+    }
 
     let (dl_url, ext) = extract_download_url(&body)
         .ok_or_else(|| format!("[PolyPizza] no download URL for '{}': {:.300}", id, body))?;
@@ -209,27 +239,63 @@ fn do_download(id: &str, name: &str, author: &str, license: &str, src: &str) -> 
 // }
 
 fn parse_explore(body: &str) -> Option<Vec<ModelSummary>> {
-    let arr = find_json_array(body, "results").or_else(|| find_json_array(body, "items"))?;
-    Some(
-        split_json_objects(arr)
-            .iter()
-            .filter_map(|o| parse_summary(o))
-            .collect(),
-    )
+    // Try "results", then "items", then "unity" (poly.pizza also returns unity assets)
+    let arr = find_json_array(body, "results")
+        .or_else(|| find_json_array(body, "items"))
+        .or_else(|| find_json_array(body, "unity"))?;
+
+    let objs = split_json_objects(arr);
+    log::debug!("[PolyPizza] {} raw objects to parse", objs.len());
+
+    let out: Vec<ModelSummary> = objs
+        .iter()
+        .filter_map(|o| {
+            let s = parse_summary(o);
+            if s.is_none() {
+                log::debug!("[PolyPizza] parse_summary failed for obj: {:.100}", o);
+            }
+            s
+        })
+        .collect();
+    log::info!("[PolyPizza] parsed {} summaries", out.len());
+    Some(out)
 }
 
 fn parse_summary(obj: &str) -> Option<ModelSummary> {
-    let id = json_str(obj, "ID").or_else(|| json_str(obj, "id"))?;
-    let name = json_str(obj, "Title")
-        .or_else(|| json_str(obj, "name"))
+    // Actual Poly Pizza API (observed response):
+    // "publicID":"fnFCCFiHbQt" — string slug (the real ID)
+    // "title":"Space probe"   — lowercase
+    // "creator":{"username":"Poly by Google"} — lowercase
+    // "licence":"CC-BY 3.0"   — lowercase
+    // "previewUrl":"https://..."
+    // "url":"/m/fnFCCFiHbQt"
+    // "publicID" is the string slug; "id" is a useless integer; "url"="/m/{slug}" fallback
+    let id = json_str(obj, "publicID")
+        .or_else(|| json_str(obj, "ID"))
+        .or_else(|| {
+            json_str(obj, "url").and_then(|u| {
+                if u.len() > 3 && &u[..3] == "/m/" {
+                    Some(u[3..].to_string())
+                } else {
+                    None
+                }
+            })
+        })?;
+    let name = json_str(obj, "title")
+        .or_else(|| json_str(obj, "Title"))
+        .or_else(|| json_str(obj, "alt"))
         .unwrap_or_default();
-    let author = json_nested_str(obj, "Creator", "DisplayName")
+    let author = json_nested_str(obj, "creator", "username")
+        .or_else(|| json_nested_str(obj, "Creator", "DisplayName"))
         .or_else(|| json_nested_str(obj, "Creator", "Username"))
         .unwrap_or_default();
-    let license = json_str(obj, "Licence")
+    let license = json_str(obj, "licence")
+        .or_else(|| json_str(obj, "Licence"))
         .or_else(|| json_str(obj, "license"))
         .unwrap_or_else(|| "CC-BY".to_string());
-    let thumbnail_url = json_str(obj, "Thumbnail").unwrap_or_default();
+    let thumbnail_url = json_str(obj, "previewUrl")
+        .or_else(|| json_str(obj, "Thumbnail"))
+        .unwrap_or_default();
     let source_url = format!("https://poly.pizza/m/{}", id);
     Some(ModelSummary {
         id,
@@ -263,9 +329,27 @@ fn extract_download_url(body: &str) -> Option<(String, String)> {
             }
         }
     }
-    // Flat Download field fallback
-    let url = json_str(body, "Download").or_else(|| json_str(body, "download"))?;
-    Some((url.clone(), url_ext(&url)))
+    // Flat Download/download field
+    if let Some(url) = json_str(body, "Download").or_else(|| json_str(body, "download")) {
+        return Some((url.clone(), url_ext(&url)));
+    }
+
+    // Last resort: scan for any .glb/.fbx URL in the response body
+    // The CDN URL pattern is: https://static.poly.pizza/.../*.glb
+    for needle in &[".glb", ".fbx", ".obj"] {
+        if let Some(pos) = body.find(needle) {
+            // Walk back to find the opening quote of the URL
+            let before = &body[..pos];
+            if let Some(q) = before.rfind('"') {
+                let url = &before[q + 1..];
+                let url = format!("{}{}", url, &needle[..needle.len() - 1]);
+                if url.starts_with("http") {
+                    return Some((url, url_ext(needle)));
+                }
+            }
+        }
+    }
+    None
 }
 
 fn url_ext(url: &str) -> String {

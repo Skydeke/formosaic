@@ -1,0 +1,12 @@
+- Shaders: Uniform to own Files, Location Check.
+- Nicer puzzle mechanics, atm it is too simple / boring.
+    - I like the idea of something very nice with foundations in information theory to determinie best puzzles
+- Clean up architecture
+- https://poly.pizza/explore 
+    - Download 3d models for level generation from there
+    - Played levels have model and their credits downloaded locally, to replay as much as you want
+    - Game should have button for random level
+    - Menu for selecting levels with preview of the finished 3d models.
+- 2 Play-Modes:
+    - Display 3d models from https://poly.pizza/explore to generate level
+    - Re-Play level that was already generated

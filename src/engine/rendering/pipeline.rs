@@ -48,11 +48,13 @@ pub struct HintFrameData {
     pub glow_intensity: f32,
     pub time:          f32,
     // Menu
-    pub show_menu:     bool,
-    pub menu_panel:    MenuPanel,
-    pub levels:        Vec<LevelMeta>,
+    pub show_menu:      bool,
+    pub menu_panel:     MenuPanel,
+    pub levels:         Vec<LevelMeta>,
     pub selected_level: usize,
     pub is_downloading: bool,
+    /// Show on-screen touch buttons during gameplay (for Android/touch)
+    pub show_touch_btns: bool,
 }
 
 impl Default for HintFrameData {
@@ -73,6 +75,7 @@ impl Default for HintFrameData {
             levels:        Vec::new(),
             selected_level: 0,
             is_downloading: false,
+            show_touch_btns: false,
         }
     }
 }
@@ -204,6 +207,10 @@ impl Pipeline {
             gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
             gl::MemoryBarrier(gl::ALL_BARRIER_BITS);
             gl::UseProgram(0);
+            // Unbind compute shader image units to prevent DrawArrays conflicts
+            for unit in 0u32..4 {
+                gl::BindImageTexture(unit, 0, 0, gl::FALSE, 0, gl::READ_ONLY, gl::RGBA8);
+            }
             gl::Enable(gl::DEPTH_TEST);
             gl::DepthMask(gl::TRUE);
             gl::Enable(gl::CULL_FACE);
@@ -254,6 +261,15 @@ impl Pipeline {
                     time:           hint.time,
                 };
                 menu.render_menu(&menu_data, w, h_px);
+            }
+        }
+
+        // On-screen touch buttons (shown during gameplay on touch devices)
+        if hint.show_touch_btns && !hint.show_menu {
+            let res = self.context.borrow().get_camera().borrow().resolution;
+            let (w, h_px) = (res.x as f32, res.y as f32);
+            if let Some(menu) = &mut self.menu {
+                menu.render_touch_buttons(w, h_px);
             }
         }
     }

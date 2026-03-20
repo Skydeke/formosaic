@@ -382,12 +382,12 @@ void main() { fragColor = vCol; }
         // Sidebar divider
         self.line(sidebar_w, 0.0, sidebar_w, h, BORDER);
 
-        // Logo
-        let logo_s = h * 0.026;
+        // Logo — scale relative to sidebar width to avoid overflow
+        let logo_s = (sidebar_w / 10.0).min(h * 0.026).max(8.0);
         self.text("FORMO", pad, h * 0.07, logo_s, TEXT);
         self.text("SAIC",  pad, h * 0.07 + logo_s * 9.5, logo_s, TEXT);
 
-        let sub_s = h * 0.012;
+        let sub_s = (sidebar_w / 22.0).min(h * 0.012).max(6.0);
         self.text("PUZZLE GAME", pad, h * 0.07 + logo_s * 20.0, sub_s, TEXT_DIM);
 
         // Nav items
@@ -398,7 +398,7 @@ void main() { fragColor = vCol; }
         ];
         let nav_y0   = h * 0.42;
         let nav_step = h * 0.075;
-        let nav_s    = h * 0.013;
+        let nav_s    = (sidebar_w / 20.0).min(h * 0.013).max(6.0);
 
         for (i, &(key, label, active)) in nav_items.iter().enumerate() {
             let ny  = nav_y0 + i as f32 * nav_step;
@@ -436,7 +436,7 @@ void main() { fragColor = vCol; }
         self.flush_tris();
         self.line(0.0, bar_y, w, bar_y, BORDER);
 
-        let cs = h * 0.010;
+        let cs = (w / 80.0).min(h * 0.010).max(5.0);
         let controls: &[(&str, &str)] = &[
             ("H","HINT"), ("L","LEVELS"), ("N","ONLINE"),
             ("R","RANDOM"), ("K","SOLVE"), ("ESC","MENU"),
@@ -607,6 +607,90 @@ void main() { fragColor = vCol; }
             self.text(btn, cx - text_width(btn, ds*1.1)*0.5, btn_y + ds, ds * 1.1, TEXT);
             self.flush_lines();
         }
+    }
+}
+
+/// In-game touch/on-screen button overlay — shown during gameplay.
+/// Provides ESC (menu), H (hint), L (rescramble) as large tap targets.
+pub struct TouchButton {
+    pub x: f32, pub y: f32, pub w: f32, pub h: f32,
+    pub label: &'static str,
+    pub key: &'static str,
+}
+
+impl MenuRenderer {
+    pub fn render_touch_buttons(&mut self, w: f32, h: f32) {
+        let btn_h   = (h * 0.10).max(44.0);
+        let btn_w   = (w * 0.14).max(80.0);
+        let margin  = w * 0.012;
+        let y_pos   = h - btn_h - margin;
+        let alpha   = 0.55f32;
+
+        unsafe {
+            gl::Disable(gl::DEPTH_TEST);
+            gl::Disable(gl::CULL_FACE);
+            gl::Enable(gl::BLEND);
+            gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
+            gl::UseProgram(self.shader_id);
+            if self.loc_res >= 0 { gl::Uniform2f(self.loc_res, w, h); }
+            gl::BindVertexArray(self.vao_id);
+            gl::BindBuffer(gl::ARRAY_BUFFER, self.vbo_id);
+        }
+
+        self.batch.clear();
+
+        let buttons: &[(&str, &str)] = &[
+            ("ESC", "MENU"),
+            ("H",   "HINT"),
+            ("L",   "AGAIN"),
+        ];
+
+        let ts = (btn_h * 0.18).max(7.0);
+        for (i, &(key, label)) in buttons.iter().enumerate() {
+            let bx = margin + i as f32 * (btn_w + margin);
+            // Background
+            self.batch.fill_rect(bx, y_pos, btn_w, btn_h,
+                [0.039, 0.043, 0.055, alpha]);
+            self.flush_tris();
+            // Border
+            self.batch.border_rect(bx, y_pos, btn_w, btn_h,
+                [0.118, 0.133, 0.208, 0.8]);
+            // Key
+            let kw = text_width(key, ts * 1.2);
+            self.text(key, bx + (btn_w - kw) * 0.5, y_pos + btn_h * 0.15, ts * 1.2,
+                [0.816, 0.847, 0.941, 0.9]);
+            // Label
+            let lw = text_width(label, ts * 0.7);
+            self.text(label, bx + (btn_w - lw) * 0.5, y_pos + btn_h * 0.58, ts * 0.7,
+                [0.353, 0.376, 0.502, 0.9]);
+            self.flush_lines();
+        }
+
+        unsafe {
+            gl::BindBuffer(gl::ARRAY_BUFFER, 0);
+            gl::BindVertexArray(0);
+            gl::UseProgram(0);
+            gl::Enable(gl::DEPTH_TEST);
+            gl::Enable(gl::CULL_FACE);
+            gl::Disable(gl::BLEND);
+        }
+    }
+
+    /// Returns which action was triggered by a touch at (tx, ty), if any.
+    /// Call this from on_event for TouchDown events.
+    pub fn hit_test_touch_buttons(tx: f32, ty: f32, w: f32, h: f32) -> Option<&'static str> {
+        let btn_h  = (h * 0.10).max(44.0);
+        let btn_w  = (w * 0.14).max(80.0);
+        let margin = w * 0.012;
+        let y_pos  = h - btn_h - margin;
+        let keys   = ["Escape", "h", "l"];
+        for (i, key) in keys.iter().enumerate() {
+            let bx = margin + i as f32 * (btn_w + margin);
+            if tx >= bx && tx <= bx + btn_w && ty >= y_pos && ty <= y_pos + btn_h {
+                return Some(key);
+            }
+        }
+        None
     }
 }
 

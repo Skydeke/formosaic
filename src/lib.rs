@@ -4,6 +4,7 @@
 pub mod engine;
 pub mod formosaic;
 pub mod game_engine;
+pub mod imgui_renderer;
 pub mod input;
 pub mod level;
 pub mod opengl;
