@@ -24,11 +24,16 @@ CMDLINE_TOOLS    := $(SDK_DIR)/cmdline-tools/latest
 NDK_VERSION      := 25.2.9519653
 NDK_HOME         := $(SDK_DIR)/ndk/$(NDK_VERSION)
 
+BINDGEN_ARGS := \
+  --sysroot=$(NDK_HOME)/toolchains/llvm/prebuilt/linux-x86_64/sysroot \
+  --target=aarch64-linux-android23
+
 # cargo-apk needs these three vars; we pass them only to Android targets.
 ANDROID_ENV := \
   ANDROID_HOME=$(SDK_DIR) \
   ANDROID_NDK_HOME=$(NDK_HOME) \
   ANDROID_NDK_ROOT=$(NDK_HOME) \
+  BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android="$(BINDGEN_ARGS)" \
   PATH=$(SDK_DIR)/platform-tools:$(CMDLINE_TOOLS)/bin:$(PATH)
 
 # Suppress warnings from vendored C code inside assimp / russimp-ng.
