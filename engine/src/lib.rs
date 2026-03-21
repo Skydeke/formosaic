@@ -14,3 +14,4 @@ pub mod architecture;
 pub mod opengl;
 pub mod input;
 pub mod rendering;
+pub mod app;

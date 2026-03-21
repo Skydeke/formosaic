@@ -4,21 +4,18 @@
 //! animated wire-mesh particle system.  All interactive UI (buttons, text,
 //! level cards) is handled by imgui on top.
 //!
-//! Also provides the in-game touch button overlay for Android via
-//! `render_touch_buttons` / `hit_test_touch_buttons`.
 
-use formosaic_engine::architecture::scene::scene_context::SceneContext;
-use formosaic_engine::rendering::abstracted::irenderer::{IRenderer, RenderPass};
-use formosaic_engine::opengl::{
-    constants::{data_type::DataType, vbo_target::VboTarget, vbo_usage::VboUsage},
-    objects::{attribute::Attribute, vao::Vao, vbo::Vbo},
-    shaders::SimpleProgram,
+use formosaic_engine::{
+    architecture::scene::scene_context::SceneContext,
+    rendering::abstracted::{irenderer::{IRenderer, RenderPass}, processable::NoopProcessable},
+    opengl::{
+        constants::{data_type::DataType, vbo_target::VboTarget, vbo_usage::VboUsage},
+        objects::{attribute::Attribute, vao::Vao, vbo::Vbo},
+        shaders::{uniform::{UniformAdapter, UniformVec2}, RenderState, ShaderProgram},
+    },
 };
-
-// ─── Colour palette ───────────────────────────────────────────────────────────
-// BG is derived from SceneContext::lights.clear_color at render time so the
-// menu backdrop exactly matches the in-game sky colour.
-const BORDER: [f32; 4] = [0.118, 0.133, 0.208, 1.0];
+use cgmath::Vector2;
+use std::{cell::RefCell, rc::Rc};
 
 // ─── Wire-mesh particle ───────────────────────────────────────────────────────
 struct Particle { x: f32, y: f32, vx: f32, vy: f32 }
@@ -58,9 +55,11 @@ impl Batch {
 }
 
 // ─── Renderer ─────────────────────────────────────────────────────────────────
+struct FrameState { res: Vector2<f32> }
+
 pub struct MenuRenderer {
-    program:   SimpleProgram,
-    loc_res:   i32,
+    shader:    ShaderProgram<NoopProcessable>,
+    frame:     Rc<RefCell<FrameState>>,
     vao:       Vao,
     vbo:       Vbo,
     batch:     Batch,
@@ -76,9 +75,15 @@ impl MenuRenderer {
     }
 
     pub fn with_shaders(vert_src: &str, frag_src: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let program  = SimpleProgram::from_sources(vert_src, frag_src)
-            .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
-        let loc_res  = program.uniform_location("uRes");
+        let frame = Rc::new(RefCell::new(FrameState { res: Vector2::new(1.0, 1.0) }));
+        let mut shader = ShaderProgram::<NoopProcessable>::from_sources(vert_src, frag_src)?;
+        {
+            let f = Rc::clone(&frame);
+            shader.add_per_render_uniform(Rc::new(RefCell::new(UniformAdapter {
+                uniform: UniformVec2::new("uRes"),
+                extractor: Box::new(move |_: &RenderState<NoopProcessable>| f.borrow().res),
+            })));
+        }
 
         let stride = (FLOATS_PER_VERT * std::mem::size_of::<f32>()) as i32;
         let mut vbo = Vbo::create(VboTarget::ArrayBuffer, VboUsage::DynamicDraw);
@@ -98,7 +103,7 @@ impl MenuRenderer {
         vbo.unbind();
 
         Ok(Self {
-            program, loc_res,
+            shader, frame,
             vao, vbo,
             batch: Batch::new(),
             particles: Vec::new(),
@@ -178,16 +183,16 @@ impl MenuRenderer {
 
     // ── GL setup / teardown helpers ───────────────────────────────────────
     fn begin_draw(&mut self, w: f32, h: f32) {
+        self.frame.borrow_mut().res = Vector2::new(w, h);
         unsafe {
             gl::Disable(gl::DEPTH_TEST);
             gl::Disable(gl::CULL_FACE);
             gl::Enable(gl::BLEND);
             gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
         }
-        self.program.bind();
-        if self.loc_res >= 0 {
-            unsafe { gl::Uniform2f(self.loc_res, w, h); }
-        }
+        self.shader.bind();
+        let state = RenderState::new_screenspace(self);
+        self.shader.update_per_render_uniforms(&state);
         self.vao.bind();
         self.vbo.bind();
         self.batch.clear();
@@ -196,7 +201,7 @@ impl MenuRenderer {
     fn end_draw(&mut self) {
         self.vbo.unbind();
         self.vao.unbind();
-        self.program.unbind();
+        self.shader.unbind();
         unsafe {
             gl::Enable(gl::DEPTH_TEST);
             gl::Enable(gl::CULL_FACE);
@@ -222,72 +227,20 @@ impl MenuRenderer {
 
         self.end_draw();
     }
-
-    // ── Public: Android touch buttons ────────────────────────────────────
-    /// Draw ESC/HINT tap targets during gameplay (Android only).
-    /// Buttons are placed on the RIGHT side of the screen.
-    pub fn render_touch_buttons(&mut self, w: f32, h: f32) {
-        let btn_h  = (h * 0.10).max(44.0);
-        let btn_w  = (w * 0.14).max(80.0);
-        let margin = w * 0.012;
-        let y_pos  = h - btn_h - margin;
-
-        self.begin_draw(w, h);
-
-        // Two buttons only — Re-Scramble removed.
-        let buttons: &[(&str, &str)] = &[
-            ("ESC", "MENU"),
-            ("H",   "HINT"),
-        ];
-
-        for (i, &(_key, _label)) in buttons.iter().enumerate() {
-            // Anchor from the RIGHT edge instead of the left.
-            let bx = w - margin - (i as f32 + 1.0) * (btn_w + margin);
-            // Button background — slight transparency over the 3D scene
-            self.batch.fill_rect(bx, y_pos, btn_w, btn_h, [0.02, 0.03, 0.05, 0.75]);
-            self.flush_tris();
-            let (x2, y2) = (bx + btn_w, y_pos + btn_h);
-            self.batch.line(bx, y_pos, x2, y_pos, BORDER);
-            self.batch.line(x2, y_pos, x2, y2,    BORDER);
-            self.batch.line(x2, y2,    bx, y2,    BORDER);
-            self.batch.line(bx, y2,    bx, y_pos, BORDER);
-            self.flush_lines();
-        }
-
-        self.end_draw();
-    }
-
-    /// Returns which key was hit by a touch at (tx, ty), if any.
-    /// Returns `Some("Escape" | "h")` matching the EngineKey names.
-    pub fn hit_test_touch_buttons(tx: f32, ty: f32, w: f32, h: f32) -> Option<&'static str> {
-        let btn_h  = (h * 0.10).max(44.0);
-        let btn_w  = (w * 0.14).max(80.0);
-        let margin = w * 0.012;
-        let y_pos  = h - btn_h - margin;
-        // Must match render order: index 0 = rightmost = ESC, index 1 = HINT
-        let keys = ["Escape", "h"];
-        for (i, key) in keys.iter().enumerate() {
-            let bx = w - margin - (i as f32 + 1.0) * (btn_w + margin);
-            if tx >= bx && tx <= bx + btn_w && ty >= y_pos && ty <= y_pos + btn_h {
-                return Some(key);
-            }
-        }
-        None
-    }
 }
 
 impl IRenderer for MenuRenderer {
     fn pass(&self) -> RenderPass { RenderPass::Late }
 
     fn render(&mut self, ctx: &SceneContext) {
-        let res = ctx.get_camera().borrow().resolution;
-        let w   = res.x as f32;
-        let h   = res.y as f32;
+        // Draw animated backdrop only when in menu.
+        // Touch buttons are drawn by imgui (build_ui in formosaic.rs).
         if ctx.show_menu {
+            let res = ctx.get_camera().borrow().resolution;
+            let w   = res.x as f32;
+            let h   = res.y as f32;
             self.update(ctx.delta_time, w, h);
             self.render_background(w, h, ctx.lights.clear_color);
-        } else if ctx.is_touch {
-            self.render_touch_buttons(w, h);
         }
     }
 

@@ -1,7 +1,8 @@
 //! Solve shine renderer — Overlay pass.
 //!
-//! Reads solved state and G-buffer textures from SceneContext at render time.
-//! Accepts shader source at construction; `new()` uses the game's default shaders.
+//! Uses ShaderProgram<NoopProcessable> + UniformAdapter closures over a shared
+//! FrameState — the same pattern as EntityRenderer and LightingPass.
+//! No raw gl::Uniform* calls, no uniform_location.
 
 use formosaic_engine::{
     architecture::scene::scene_context::SceneContext,
@@ -11,11 +12,13 @@ use formosaic_engine::{
     },
     opengl::{
         constants::data_type::DataType,
+        fbos::simple_texture::SimpleTexture,
         objects::{attribute::Attribute, data_buffer::DataBuffer, ivbo::IVbo, vao::Vao},
         shaders::{
-            uniform::{UniformAdapter, UniformFloat, UniformInt},
+            uniform::{UniformAdapter, UniformFloat, UniformTexture},
             RenderState, ShaderProgram,
         },
+        textures::texture::Texture,
     },
 };
 use std::{cell::RefCell, rc::Rc};
@@ -24,9 +27,9 @@ const DEFAULT_VERT: &str = include_str!("../../assets/shaders/shine.vert.glsl");
 const DEFAULT_FRAG: &str = include_str!("../../assets/shaders/shine.frag.glsl");
 
 struct FrameState {
-    solved_timer:    f32,  // -1.0 = not solved
-    albedo_unit:     i32,  // GL texture unit index for albedo
-    position_unit:   i32,  // GL texture unit index for position
+    solved_timer:    f32,  // negative = not solved
+    position_tex_id: u32,
+    albedo_tex_id:   u32,
 }
 
 pub struct ShineRenderer {
@@ -53,16 +56,15 @@ impl ShineRenderer {
             &[Attribute::of(0, 2, DataType::Float, false)],
         );
 
-        // Position G-buffer on unit 0, albedo on unit 1 — fixed, set once.
         let frame = Rc::new(RefCell::new(FrameState {
-            solved_timer:  -1.0,
-            albedo_unit:   1,
-            position_unit: 0,
+            solved_timer:    -1.0,
+            position_tex_id: 0,
+            albedo_tex_id:   0,
         }));
 
         let mut shader = ShaderProgram::<NoopProcessable>::from_sources(vert, frag)?;
 
-        // uTime — drives the sweep animation, updates every frame.
+        // uTime — drives the sweep animation.
         {
             let f = Rc::clone(&frame);
             shader.add_per_render_uniform(Rc::new(RefCell::new(UniformAdapter {
@@ -72,23 +74,27 @@ impl ShineRenderer {
                 }),
             })));
         }
-        // Sampler uniforms — constant unit indices, but registered through the
-        // same uniform system for consistency.
+        // uPosition — world-space position G-buffer, sampler on unit 0.
         {
             let f = Rc::clone(&frame);
             shader.add_per_render_uniform(Rc::new(RefCell::new(UniformAdapter {
-                uniform: UniformInt::new("uPosition"),
+                uniform: UniformTexture::new("uPosition", 0),
                 extractor: Box::new(move |_: &RenderState<NoopProcessable>| {
-                    f.borrow().position_unit
+                    let id = f.borrow().position_tex_id;
+                    if id == 0 { None }
+                    else { Some(Rc::new(SimpleTexture::new(id)) as Rc<dyn Texture>) }
                 }),
             })));
         }
+        // uAlbedo — albedo G-buffer (alpha channel = model mask), sampler on unit 1.
         {
             let f = Rc::clone(&frame);
             shader.add_per_render_uniform(Rc::new(RefCell::new(UniformAdapter {
-                uniform: UniformInt::new("uAlbedo"),
+                uniform: UniformTexture::new("uAlbedo", 1),
                 extractor: Box::new(move |_: &RenderState<NoopProcessable>| {
-                    f.borrow().albedo_unit
+                    let id = f.borrow().albedo_tex_id;
+                    if id == 0 { None }
+                    else { Some(Rc::new(SimpleTexture::new(id)) as Rc<dyn Texture>) }
                 }),
             })));
         }
@@ -102,30 +108,30 @@ impl IRenderer for ShineRenderer {
     fn pass(&self) -> RenderPass { RenderPass::Overlay }
 
     fn render(&mut self, context: &SceneContext) {
-        let timer = match context.solved_timer { Some(t) => t, None => return };
+        let timer  = match context.solved_timer { Some(t) => t, None => return };
+        let output = match context.output_data() { Some(d) => d, None => return };
 
-        let (albedo_tex, pos_tex) = match context.output_data() {
-            Some(d) => (d.colour.get_id(), d.position.get_id()),
-            None    => return,
-        };
-        if pos_tex == 0 { return; }
-
-        self.frame.borrow_mut().solved_timer = timer;
+        // Write current frame's texture IDs and timer into shared state so the
+        // UniformAdapter extractors pick them up in update_per_render_uniforms.
+        {
+            let mut f = self.frame.borrow_mut();
+            f.solved_timer    = timer;
+            f.position_tex_id = output.position.get_id();
+            f.albedo_tex_id   = output.colour.get_id();
+        }
 
         unsafe {
             gl::Disable(gl::DEPTH_TEST);
+            gl::Disable(gl::CULL_FACE);
             gl::Enable(gl::BLEND);
             gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
-
-            // Bind G-buffer textures to the units the uniforms declare.
-            gl::ActiveTexture(gl::TEXTURE0);
-            gl::BindTexture(gl::TEXTURE_2D, pos_tex);
-            gl::ActiveTexture(gl::TEXTURE1);
-            gl::BindTexture(gl::TEXTURE_2D, albedo_tex);
         }
 
         self.shader.bind();
         let state = RenderState::new_screenspace(self);
+        // UniformTexture::load() now always calls bind_to_unit() regardless of
+        // whether the driver reports location -1 — texture binding is global GL
+        // state separated from the sampler-unit Uniform1i declaration.
         self.shader.update_per_render_uniforms(&state);
 
         self.vao.bind();
@@ -136,7 +142,9 @@ impl IRenderer for ShineRenderer {
 
         unsafe {
             gl::Enable(gl::DEPTH_TEST);
+            gl::Enable(gl::CULL_FACE);
             gl::Disable(gl::BLEND);
+            // Clean up texture units.
             gl::ActiveTexture(gl::TEXTURE1);
             gl::BindTexture(gl::TEXTURE_2D, 0);
             gl::ActiveTexture(gl::TEXTURE0);

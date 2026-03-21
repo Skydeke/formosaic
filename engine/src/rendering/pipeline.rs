@@ -93,11 +93,16 @@ impl Pipeline {
             use crate::rendering::render_output_data::RenderOutputData;
             use crate::opengl::fbos::simple_texture::SimpleTexture;
             let a = self.deferred_fbo.get_attachments();
-            if a.len() >= 4 {
+            // Colour attachments: [0]=albedo, [1]=normal, [2]=position.
+            // Depth is stored separately in depth_attachment, NOT in this vec.
+            if a.len() >= 3 {
                 let colour_id   = a[0].get_texture().get_id();
                 let normal_id   = a[1].get_texture().get_id();
-                let depth_id    = a[3].get_texture().get_id();
                 let position_id = a[2].get_texture().get_id();
+                let depth_id    = self.deferred_fbo
+                    .get_depth_attachment()
+                    .map(|d| d.get_texture().get_id())
+                    .unwrap_or(0);
                 self.context.borrow_mut().set_output_data(RenderOutputData::new(
                     Box::new(SimpleTexture::new(colour_id)),
                     Box::new(SimpleTexture::new(normal_id)),

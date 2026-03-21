@@ -1,7 +1,6 @@
 //! Hint overlay renderer (Tier 1+).
 //!
-//! Reads hint state from `SceneContext::hints` at render time.
-//! Accepts shader source at construction; `new()` uses the game's default shaders.
+//! Uses ShaderProgram<NoopProcessable> + UniformAdapter — same pattern as EntityRenderer.
 
 use formosaic_engine::{
     architecture::scene::scene_context::SceneContext,
@@ -24,7 +23,6 @@ use std::{cell::RefCell, rc::Rc};
 const DEFAULT_VERT: &str = include_str!("../../assets/shaders/hint.vert.glsl");
 const DEFAULT_FRAG: &str = include_str!("../../assets/shaders/hint.frag.glsl");
 
-// Shared per-frame state between the struct and uniform extractor closures.
 struct FrameState {
     warmth_color: Vector3<f32>,
     warmth:       f32,
@@ -36,17 +34,13 @@ pub struct HintRenderer {
     vao:    Vao,
     shader: ShaderProgram<NoopProcessable>,
     frame:  Rc<RefCell<FrameState>>,
-    pub active: bool,
 }
 
 impl HintRenderer {
-    /// Construct with the game's default hint shaders.
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
         Self::with_shaders(DEFAULT_VERT, DEFAULT_FRAG)
     }
 
-    /// Construct with custom shader sources — lets the game (or a future user
-    /// of the engine) supply different visual styles for the hint overlay.
     pub fn with_shaders(vert: &str, frag: &str) -> Result<Self, Box<dyn std::error::Error>> {
         #[rustfmt::skip]
         let verts: [f32; 12] = [
@@ -55,7 +49,10 @@ impl HintRenderer {
         ];
         let buf = DataBuffer::load_static(&verts);
         let mut vao = Vao::create();
-        vao.load_data_buffer(Rc::new(buf) as Rc<dyn IVbo>, &[Attribute::of(0, 2, DataType::Float, false)]);
+        vao.load_data_buffer(
+            Rc::new(buf) as Rc<dyn IVbo>,
+            &[Attribute::of(0, 2, DataType::Float, false)],
+        );
 
         let frame = Rc::new(RefCell::new(FrameState {
             warmth_color: Vector3::new(1.0, 1.0, 1.0),
@@ -93,7 +90,7 @@ impl HintRenderer {
             })));
         }
 
-        Ok(Self { vao, shader, frame, active: false })
+        Ok(Self { vao, shader, frame })
     }
 }
 
@@ -103,11 +100,9 @@ impl IRenderer for HintRenderer {
     fn render(&mut self, context: &SceneContext) {
         let hints = match context.hints {
             Some(h) if h.tier >= 1 => h,
-            _ => { self.active = false; return; }
+            _ => return,
         };
-        self.active = true;
 
-        // Write current hint state into the shared frame so uniform extractors see it.
         {
             let mut f = self.frame.borrow_mut();
             f.warmth_color = Vector3::new(
@@ -120,6 +115,7 @@ impl IRenderer for HintRenderer {
 
         unsafe {
             gl::Disable(gl::DEPTH_TEST);
+            gl::Disable(gl::CULL_FACE);
             gl::Enable(gl::BLEND);
             gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
         }
@@ -136,10 +132,11 @@ impl IRenderer for HintRenderer {
 
         unsafe {
             gl::Enable(gl::DEPTH_TEST);
+            gl::Enable(gl::CULL_FACE);
             gl::Disable(gl::BLEND);
         }
     }
 
-    fn any_processed(&self) -> bool { self.active }
+    fn any_processed(&self) -> bool { true }
     fn finish(&mut self) {}
 }

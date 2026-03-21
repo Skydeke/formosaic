@@ -628,16 +628,13 @@ dependencies = [
  "env_logger",
  "formosaic-engine",
  "gl",
- "glutin",
  "glutin-winit",
  "imgui",
- "imgui-winit-support",
  "jni",
  "log",
  "ndk-context",
  "png",
  "rand",
- "raw-window-handle",
  "ureq",
  "winit",
 ]
@@ -650,10 +647,14 @@ dependencies = [
  "cgmath",
  "gl",
  "gl_generator",
+ "glutin",
+ "glutin-winit",
  "imgui",
+ "imgui-winit-support",
  "log",
  "rand",
  "russimp-ng",
+ "winit",
 ]
 
 [[package]]

@@ -1,21 +1,22 @@
 //! Dear ImGui GL renderer — implements `IRenderer`.
 //!
-//! `game_engine` builds the imgui frame, calls `imgui_ctx.render()`, and stores
-//! the resulting `*const DrawData` in `SceneContext::imgui_draw_data`.
-//! `ImguiGlRenderer::render()` reads it from context — same pattern as every
-//! other renderer.  The pointer is valid for the duration of the frame.
-//!
-//! Shader source lives in `assets/shaders/imgui.{vert,frag}.glsl`.
-//! `uTexture` is bound to unit 0 once at construction and never changed.
-//! `uProjMtx` is rebuilt each frame from `DrawData::display_size`.
+//! Uses ShaderProgram<NoopProcessable> + UniformAdapter — same pattern as
+//! EntityRenderer. uTexture (sampler) is registered as a constant UniformInt.
+//! uProjMtx is written into FrameState each frame and read by the extractor.
 
 use crate::architecture::scene::scene_context::SceneContext;
-use crate::rendering::abstracted::irenderer::{IRenderer, RenderPass};
+use crate::rendering::abstracted::{
+    irenderer::{IRenderer, RenderPass},
+    processable::NoopProcessable,
+};
 use crate::opengl::{
     constants::{data_type::DataType, vbo_target::VboTarget, vbo_usage::VboUsage},
     fbos::simple_texture::SimpleTexture,
     objects::{attribute::Attribute, vao::Vao, vbo::Vbo},
-    shaders::SimpleProgram,
+    shaders::{
+        uniform::{UniformAdapter, UniformInt, UniformMatrix4},
+        RenderState, ShaderProgram,
+    },
     textures::{
         texture::Texture,
         texture_configs::TextureConfigs,
@@ -25,38 +26,58 @@ use crate::opengl::{
         },
     },
 };
+use cgmath::Matrix4;
 use imgui::{DrawData, DrawIdx, DrawVert, TextureId};
-use std::mem;
+use std::{cell::RefCell, mem, rc::Rc};
+
+struct FrameState {
+    proj: Matrix4<f32>,
+}
 
 pub struct ImguiGlRenderer {
-    program:      SimpleProgram,
-    loc_proj:     i32,
-    vao:          Vao,
-    vbo:          Vbo,
-    ebo:          Vbo,
-    /// Font texture — must outlive the renderer so imgui's texture ID stays valid.
+    shader:   ShaderProgram<NoopProcessable>,
+    frame:    Rc<RefCell<FrameState>>,
+    vao:      Vao,
+    vbo:      Vbo,
+    ebo:      Vbo,
     #[allow(dead_code)]
-    font_tex:     SimpleTexture,
+    font_tex: SimpleTexture,
 }
 
 const DEFAULT_VERT: &str = include_str!("../../../assets/shaders/imgui.vert.glsl");
 const DEFAULT_FRAG: &str = include_str!("../../../assets/shaders/imgui.frag.glsl");
 
 impl ImguiGlRenderer {
-    pub fn new(imgui: &mut imgui::Context) -> Result<Self, String> {
+    pub fn new(imgui: &mut imgui::Context) -> Result<Self, Box<dyn std::error::Error>> {
         Self::with_shaders(imgui, DEFAULT_VERT, DEFAULT_FRAG)
     }
 
-    pub fn with_shaders(imgui: &mut imgui::Context, vert_src: &str, frag_src: &str) -> Result<Self, String> {
-        let program  = SimpleProgram::from_sources(vert_src, frag_src)?;
-        let loc_proj = program.uniform_location("uProjMtx");
+    pub fn with_shaders(
+        imgui: &mut imgui::Context,
+        vert_src: &str,
+        frag_src: &str,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let frame = Rc::new(RefCell::new(FrameState {
+            proj: Matrix4::from_scale(1.0),
+        }));
 
-        // Bind sampler to unit 0 once — it never changes.
-        program.bind();
-        program.set_uniform_int(program.uniform_location("uTexture"), 0);
-        program.unbind();
+        let mut shader = ShaderProgram::<NoopProcessable>::from_sources(vert_src, frag_src)?;
 
-        // DrawVert: pos(f32×2) + uv(f32×2) + col(u8×4) = 20 bytes
+        // uProjMtx — rebuilt each frame from DrawData in draw().
+        {
+            let f = Rc::clone(&frame);
+            shader.add_per_render_uniform(Rc::new(RefCell::new(UniformAdapter {
+                uniform: UniformMatrix4::new("uProjMtx"),
+                extractor: Box::new(move |_: &RenderState<NoopProcessable>| f.borrow().proj),
+            })));
+        }
+        // uTexture — always unit 0, never changes.
+        shader.add_per_render_uniform(Rc::new(RefCell::new(UniformAdapter {
+            uniform: UniformInt::new("uTexture"),
+            extractor: Box::new(|_: &RenderState<NoopProcessable>| 0i32),
+        })));
+
+        // DrawVert layout: pos(f32×2) + uv(f32×2) + col(u8×4) = 20 bytes
         let stride = mem::size_of::<DrawVert>() as i32;
 
         // VAO must be bound before EBO — on GLES the EBO binding is VAO state.
@@ -78,7 +99,7 @@ impl ImguiGlRenderer {
 
         vao.unbind();
         vbo.unbind();
-        // Do NOT unbind EBO while VAO is unbound — can corrupt VAO state on some drivers.
+        // Do NOT unbind EBO while VAO is unbound — corrupts VAO state on some drivers.
 
         // Font texture
         let mut font_tex = SimpleTexture::create();
@@ -100,7 +121,7 @@ impl ImguiGlRenderer {
         font_tex.unbind();
         imgui.fonts().tex_id = TextureId::new(font_tex.get_id() as usize);
 
-        Ok(Self { program, loc_proj, vao, vbo, ebo, font_tex })
+        Ok(Self { shader, frame, vao, vbo, ebo, font_tex })
     }
 
     fn draw(&mut self, draw_data: &DrawData) {
@@ -111,13 +132,13 @@ impl ImguiGlRenderer {
         let [dl, dt] = draw_data.display_pos;
         let [dr, db] = [dl + draw_data.display_size[0], dt + draw_data.display_size[1]];
 
-        #[rustfmt::skip]
-        let proj: [f32; 16] = [
+        // Write the projection matrix into FrameState so the UniformAdapter extractor picks it up.
+        self.frame.borrow_mut().proj = Matrix4::new(
              2.0/(dr-dl),        0.0,          0.0, 0.0,
              0.0,          2.0/(dt-db),         0.0, 0.0,
              0.0,                0.0,          -1.0, 0.0,
             (dr+dl)/(dl-dr), (dt+db)/(db-dt),   0.0, 1.0,
-        ];
+        );
 
         let mut prev_scissor = [0i32; 4];
         let prev_scissor_test = unsafe { gl::IsEnabled(gl::SCISSOR_TEST) };
@@ -135,8 +156,9 @@ impl ImguiGlRenderer {
             gl::Enable(gl::SCISSOR_TEST);
         }
 
-        self.program.bind();
-        self.program.set_uniform_mat4(self.loc_proj, &proj);
+        self.shader.bind();
+        let state = RenderState::new_screenspace(self);
+        self.shader.update_per_render_uniforms(&state);
         self.vao.bind();
 
         let clip_off   = draw_data.display_pos;
@@ -156,8 +178,8 @@ impl ImguiGlRenderer {
                         if cw <= cx || ch <= cy { continue; }
 
                         unsafe {
-                            gl::Scissor(cx as i32, (fb_h-ch) as i32,
-                                        (cw-cx) as i32, (ch-cy) as i32);
+                            gl::Scissor(cx as i32, (fb_h - ch) as i32,
+                                        (cw - cx) as i32, (ch - cy) as i32);
                             gl::ActiveTexture(gl::TEXTURE0);
                             gl::BindTexture(gl::TEXTURE_2D,
                                             cmd_params.texture_id.id() as u32);
@@ -184,7 +206,7 @@ impl ImguiGlRenderer {
         }
 
         self.vao.unbind();
-        self.program.unbind();
+        self.shader.unbind();
         unsafe {
             gl::Disable(gl::BLEND);
             gl::Enable(gl::CULL_FACE);
@@ -200,10 +222,9 @@ impl IRenderer for ImguiGlRenderer {
 
     fn render(&mut self, context: &SceneContext) {
         if let Some(ptr) = context.imgui_draw_data {
-            // SAFETY: game_engine sets this pointer from a live &DrawData borrow
-            // that remains valid until the next imgui_ctx.render() call.
-            // pipeline.draw() — and therefore this render() — always completes
-            // before game_engine calls imgui_ctx.render() again.
+            // SAFETY: pointer is set from a live &DrawData borrow that remains
+            // valid for the entire frame — pipeline.draw() completes before
+            // game_engine calls imgui_ctx.render() again.
             let draw_data = unsafe { &*ptr };
             self.draw(draw_data);
         }

@@ -51,6 +51,8 @@ use formosaic_engine::{
         render_state::LightConfig,
     },
 };
+use imgui;
+
 use crate::{
     level::{
         poly_pizza::{ModelDownload, ModelSummary, PolyPizzaClient},
@@ -63,13 +65,8 @@ use crate::{
     },
 };
 
-// ─── Application trait ────────────────────────────────────────────────────────
-
-pub trait Application {
-    fn on_init(&mut self, context: &mut SceneContext);
-    fn on_update(&mut self, delta_time: f32, context: &mut SceneContext);
-    fn on_event(&mut self, event: &Event, context: &mut SceneContext);
-}
+// Application trait lives in the engine — re-use it here.
+pub use formosaic_engine::app::application::Application;
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -500,5 +497,319 @@ impl Application for Formosaic {
                 }
             }
         }
+    }
+
+    fn populate_scene_context(&mut self, ctx: &mut SceneContext, delta_time: f32) {
+        use formosaic_engine::rendering::render_state::HintRenderState;
+        let solved   = self.game_state == GameState::Solved && !self.is_in_menu();
+        let solved_t = self.solved_timer;
+        ctx.lights       = self.scene_lights;
+        ctx.show_menu    = self.is_in_menu();
+        ctx.is_touch     = cfg!(target_os = "android");
+        ctx.delta_time   = delta_time;
+        ctx.solved_timer = if solved { Some(solved_t) } else { None };
+        ctx.hints        = self.last_hint_output.as_ref().map(|o| HintRenderState {
+            warmth:       o.warmth,
+            warmth_color: o.warmth_color,
+            tier:         o.tier.as_u8(),
+            time:         solved_t,
+        });
+    }
+
+    fn title(&self) -> &str { "Formosaic" }
+
+    fn register_renderers(&mut self, pipeline: &mut formosaic_engine::rendering::pipeline::Pipeline) {
+        use crate::rendering::{
+            menu_render::MenuRenderer,
+            hint_render::HintRenderer,
+            shine_render::ShineRenderer,
+        };
+        match MenuRenderer::new() {
+            Ok(r)  => pipeline.add_renderer(Box::new(r)),
+            Err(e) => log::warn!("MenuRenderer failed to init: {e}"),
+        }
+        match HintRenderer::new() {
+            Ok(r)  => pipeline.add_renderer(Box::new(r)),
+            Err(e) => log::warn!("HintRenderer failed to init: {e}"),
+        }
+        match ShineRenderer::new() {
+            Ok(r)  => pipeline.add_renderer(Box::new(r)),
+            Err(e) => log::warn!("ShineRenderer failed to init: {e}"),
+        }
+    }
+
+
+    fn configure_imgui(&self, imgui: &mut imgui::Context, scale: f32) {
+        imgui.set_ini_filename(None);
+        let font_size   = (16.0_f32 * scale).round().max(16.0);
+        let imgui_scale = 1.0 / scale;
+        imgui.fonts().add_font(&[imgui::FontSource::DefaultFontData {
+            config: Some(imgui::FontConfig {
+                size_pixels: font_size,
+                ..Default::default()
+            }),
+        }]);
+        imgui.io_mut().font_global_scale = imgui_scale;
+        let style = imgui.style_mut();
+        style.window_rounding    = 4.0;
+        style.frame_rounding     = 3.0;
+        style.popup_rounding     = 3.0;
+        style.scrollbar_rounding = 3.0;
+        style.grab_rounding      = 3.0;
+        style.window_border_size = 1.0;
+        style[imgui::StyleColor::WindowBg]         = [0.06, 0.07, 0.10, 0.0];
+        style[imgui::StyleColor::TitleBg]          = [0.04, 0.05, 0.08, 1.0];
+        style[imgui::StyleColor::TitleBgActive]    = [0.08, 0.09, 0.14, 1.0];
+        style[imgui::StyleColor::Border]           = [0.12, 0.13, 0.21, 1.0];
+        style[imgui::StyleColor::FrameBg]          = [0.10, 0.11, 0.18, 1.0];
+        style[imgui::StyleColor::FrameBgHovered]   = [0.15, 0.17, 0.26, 1.0];
+        style[imgui::StyleColor::Button]           = [0.19, 0.31, 0.75, 0.75];
+        style[imgui::StyleColor::ButtonHovered]    = [0.25, 0.40, 0.90, 0.90];
+        style[imgui::StyleColor::ButtonActive]     = [0.75, 0.19, 0.29, 1.0];
+        style[imgui::StyleColor::Header]           = [0.19, 0.31, 0.75, 0.45];
+        style[imgui::StyleColor::HeaderHovered]    = [0.19, 0.31, 0.75, 0.80];
+        style[imgui::StyleColor::CheckMark]        = [0.18, 0.75, 0.50, 1.0];
+        style[imgui::StyleColor::Text]             = [0.82, 0.85, 0.94, 1.0];
+        style[imgui::StyleColor::TextDisabled]     = [0.35, 0.38, 0.50, 1.0];
+        style[imgui::StyleColor::Separator]        = [0.12, 0.13, 0.21, 1.0];
+        style[imgui::StyleColor::SeparatorHovered] = [0.40, 0.50, 0.80, 0.78];
+        #[cfg(target_os = "android")]
+        { style.touch_extra_padding = [8.0, 8.0]; }
+    }
+
+    fn build_ui(&mut self, ui: &imgui::Ui, w: f32, h: f32, ctx: &mut SceneContext) {
+        use imgui::*;
+        use crate::puzzle::entropy::difficulty_label;
+        use crate::puzzle::hints::HintTier;
+        // `use imgui::*` brings imgui::Key into scope, shadowing the engine Key.
+        // Re-import the engine Key so on_event() calls compile correctly.
+        use formosaic_engine::input::Key;
+
+        let show_menu = self.is_in_menu();
+        let is_touch  = cfg!(target_os = "android");
+
+        fn diff_color(d: f32) -> [f32; 4] {
+            match d {
+                v if v < 0.25 => [0.18, 0.75, 0.50, 1.0],
+                v if v < 0.50 => [0.75, 0.63, 0.18, 1.0],
+                v if v < 0.75 => [0.75, 0.19, 0.29, 1.0],
+                _             => [0.63, 0.18, 0.75, 1.0],
+            }
+        }
+        fn diff_label_str(d: f32) -> &'static str {
+            match d {
+                v if v < 0.25 => "Easy",
+                v if v < 0.50 => "Medium",
+                v if v < 0.75 => "Hard",
+                _             => "Expert",
+            }
+        }
+        fn truncate(s: &str, max: usize) -> String {
+            if s.len() > max { format!("{}..", &s[..max]) } else { s.to_string() }
+        }
+
+        // ── In-game HUD ───────────────────────────────────────────────────
+        let hud_flags = WindowFlags::NO_DECORATION
+            | WindowFlags::NO_MOVE
+            | WindowFlags::NO_BACKGROUND
+            | WindowFlags::NO_INPUTS
+            | WindowFlags::NO_SAVED_SETTINGS;
+
+        ui.window("##hud")
+            .flags(hud_flags)
+            .position([w - 220.0, 10.0], Condition::Always)
+            .size([210.0, 100.0], Condition::Always)
+            .build(|| {
+                if let Some(r) = self.entropy_report() {
+                    ui.text_colored([0.8, 0.85, 0.95, 0.9],
+                        format!("{:.1}s  |  {}", self.elapsed_secs(), difficulty_label(r.difficulty)));
+                    let hints = self.hint_system().hint_count();
+                    if hints > 0 { ui.text_colored([0.9, 0.6, 0.2, 0.8], format!("{} hint(s)", hints)); }
+                }
+                if self.is_solved()      { ui.text_colored([0.2, 0.9, 0.5, 1.0], "SOLVED!"); }
+                if self.is_downloading() { ui.text_colored([0.4, 0.7, 1.0, 0.8], "Fetching..."); }
+            });
+
+        // ── Hint warmth indicator ─────────────────────────────────────────
+        let hint_tier = self.hint_system().tier();
+        if hint_tier != HintTier::None {
+            ui.window("##hints")
+                .flags(hud_flags)
+                .position([10.0, 10.0], Condition::Always)
+                .size([180.0, 60.0], Condition::Always)
+                .build(|| {
+                    let warmth = self.last_hint_output().map(|o| o.warmth).unwrap_or(0.5);
+                    let cold = [0.2_f32, 0.4, 0.9, 1.0];
+                    let hot  = [0.9_f32, 0.2, 0.1, 1.0];
+                    let col  = [cold[0]+(hot[0]-cold[0])*warmth, cold[1]+(hot[1]-cold[1])*warmth,
+                                cold[2]+(hot[2]-cold[2])*warmth, 1.0];
+                    let label = if warmth > 0.8 { "HOT" } else if warmth > 0.5 { "WARM" } else { "COLD" };
+                    ui.text_colored(col, format!(">> {} <<", label));
+                    ui.text_colored([0.5, 0.5, 0.5, 0.7], format!("Hint: {:?}", hint_tier));
+                });
+        }
+
+        // ── Android in-game touch buttons (bottom-right) ────────────────
+        #[cfg(target_os = "android")]
+        if !show_menu {
+            let btn_h  = (h * 0.10).max(44.0);
+            let btn_w  = (w * 0.14).max(80.0);
+            let margin = w * 0.012;
+            // Window spans both buttons side-by-side, pinned to bottom-right.
+            let win_w  = btn_w * 2.0 + margin * 3.0;
+            let win_h  = btn_h + margin * 2.0;
+            let win_x  = w - win_w;
+            let win_y  = h - win_h;
+
+            let mut esc_clicked  = false;
+            let mut hint_clicked = false;
+
+            ui.window("##touch_btns")
+                .flags(
+                    WindowFlags::NO_DECORATION
+                    | WindowFlags::NO_MOVE
+                    | WindowFlags::NO_BACKGROUND
+                    | WindowFlags::NO_SAVED_SETTINGS,
+                )
+                .position([win_x, win_y], Condition::Always)
+                .size([win_w, win_h], Condition::Always)
+                .build(|| {
+                    ui.set_cursor_pos([margin, margin]);
+                    hint_clicked = ui.button_with_size("HINT", [btn_w, btn_h]);
+                    ui.same_line_with_spacing(0.0, margin);
+                    esc_clicked  = ui.button_with_size("ESC",  [btn_w, btn_h]);
+                });
+
+            if hint_clicked { self.on_event(&Event::KeyDown { key: Key::H },      ctx); }
+            if esc_clicked  { self.on_event(&Event::KeyDown { key: Key::Escape }, ctx); }
+            return;
+        }
+
+        if !show_menu { return; }
+
+
+        // ── Menu overlay ──────────────────────────────────────────────────
+        let menu_flags = WindowFlags::NO_DECORATION | WindowFlags::NO_MOVE
+            | WindowFlags::NO_SAVED_SETTINGS | WindowFlags::NO_BACKGROUND
+            | WindowFlags::NO_SCROLL_WITH_MOUSE;
+        let pad = (w * 0.025).max(8.0);
+        let levels: Vec<_> = self.saved_levels().to_vec();
+
+        ui.window("##menu")
+            .flags(menu_flags)
+            .position([0.0, 0.0], Condition::Always)
+            .size([w, h], Condition::Always)
+            .build(|| {
+                if is_touch {
+                    ui.set_cursor_pos([pad, pad]);
+                    ui.text_colored([0.8, 0.85, 0.95, 1.0], "FORMOSAIC");
+                    ui.same_line();
+                    ui.text_colored([0.35, 0.38, 0.50, 0.8], " v0.1");
+                    let btn_w = w - pad * 2.0;
+                    let btn_h = (h * 0.09).max(44.0);
+                    let gap   = pad * 0.5;
+                    ui.set_cursor_pos([pad, h * 0.12]);
+                    if ui.button_with_size("[N] Fetch Online", [btn_w, btn_h]) {
+                        self.on_event(&Event::KeyDown { key: Key::N }, ctx);
+                    }
+                    ui.set_cursor_pos([pad, h * 0.12 + btn_h + gap]);
+                    if ui.button_with_size("[R] Random Saved", [btn_w, btn_h]) {
+                        self.on_event(&Event::KeyDown { key: Key::R }, ctx);
+                    }
+                    if self.is_downloading() {
+                        ui.set_cursor_pos([pad, h * 0.12 + (btn_h + gap) * 2.0]);
+                        ui.text_colored([0.4, 0.7, 1.0, 1.0], "Fetching...");
+                    }
+                    let list_y = h * 0.12 + (btn_h + gap) * 2.0 + pad;
+                    let list_h = h - list_y - pad;
+                    let card_h = (h * 0.20).max(80.0);
+                    let card_w = (w - pad * 3.0) * 0.5;
+                    ui.set_cursor_pos([pad, list_y]);
+                    ui.child_window("##levels").size([w - pad * 2.0, list_h]).border(false).build(|| {
+                        if levels.is_empty() {
+                            ui.spacing();
+                            ui.text_colored([0.35, 0.38, 0.50, 1.0], "No saved levels yet.");
+                            ui.text_colored([0.35, 0.38, 0.50, 0.8], "Use [N] to fetch from Poly Pizza.");
+                        } else {
+                            let mut col = 0usize;
+                            for level in &levels {
+                                ui.child_window(format!("##c_{}", level.id))
+                                    .size([card_w, card_h]).border(true).build(|| {
+                                        ui.text_colored([0.82, 0.85, 0.94, 1.0], truncate(&level.name, 12));
+                                        ui.text_colored([0.35, 0.38, 0.50, 0.8], truncate(&level.author, 14));
+                                        ui.text_colored(diff_color(level.difficulty), diff_label_str(level.difficulty));
+                                        if let Some(t) = level.best_time_secs {
+                                            ui.text_colored([0.35, 0.38, 0.50, 0.7], format!("{:.1}s", t));
+                                        }
+                                        let play_h = (card_h * 0.3).max(24.0);
+                                        if ui.button_with_size("Play", [card_w - 8.0, play_h]) {
+                                            self.on_event(&Event::KeyDown { key: Key::R }, ctx);
+                                        }
+                                    });
+                                col += 1;
+                                if col < 2 { ui.same_line(); } else { col = 0; }
+                            }
+                        }
+                    });
+                } else {
+                    let sidebar_w = (w * 0.28).max(150.0);
+                    let btn_size  = [sidebar_w - pad * 2.0, 30.0];
+                    let card_h    = 90.0_f32;
+                    ui.set_cursor_pos([pad, pad]);
+                    ui.text_colored([0.8, 0.85, 0.95, 1.0], "FORMOSAIC");
+                    ui.same_line();
+                    ui.text_colored([0.35, 0.38, 0.50, 0.8], "  puzzle  v0.1");
+                    ui.set_cursor_pos([pad, h * 0.42]);
+                    if ui.button_with_size("[N] Fetch Online", btn_size) {
+                        self.on_event(&Event::KeyDown { key: Key::N }, ctx);
+                    }
+                    ui.set_cursor_pos([pad, h * 0.42 + 38.0]);
+                    if ui.button_with_size("[R] Random Saved", btn_size) {
+                        self.on_event(&Event::KeyDown { key: Key::R }, ctx);
+                    }
+                    if self.is_downloading() {
+                        ui.set_cursor_pos([pad, h * 0.42 + 78.0]);
+                        ui.text_colored([0.4, 0.7, 1.0, 1.0], "Fetching...");
+                    }
+                    ui.set_cursor_pos([pad, h - 20.0]);
+                    ui.text_colored([0.25, 0.27, 0.36, 0.7], "v0.1.0");
+                    let content_x = sidebar_w + pad;
+                    let content_w = w - content_x - pad;
+                    let content_y = h * 0.08;
+                    ui.set_cursor_pos([content_x, content_y]);
+                    ui.child_window("##levels").size([content_w, h - content_y - 28.0]).border(false).build(|| {
+                        if levels.is_empty() {
+                            ui.spacing(); ui.spacing();
+                            ui.text_colored([0.35, 0.38, 0.50, 1.0], "No saved levels yet.");
+                            ui.spacing();
+                            ui.text_colored([0.35, 0.38, 0.50, 0.8], "Press [N] to fetch a model from Poly Pizza.");
+                        } else {
+                            let avail = ui.content_region_avail()[0];
+                            let cols  = 3usize;
+                            let cw    = ((avail - 8.0 * cols as f32) / cols as f32).max(80.0);
+                            let mut col = 0usize;
+                            for level in &levels {
+                                ui.child_window(format!("##c_{}", level.id))
+                                    .size([cw, card_h]).border(true).build(|| {
+                                        ui.text_colored([0.82, 0.85, 0.94, 1.0], truncate(&level.name, 14));
+                                        ui.text_colored([0.35, 0.38, 0.50, 0.8], truncate(&level.author, 16));
+                                        ui.text_colored(diff_color(level.difficulty), diff_label_str(level.difficulty));
+                                        if let Some(t) = level.best_time_secs {
+                                            ui.same_line();
+                                            ui.text_colored([0.35, 0.38, 0.50, 0.7], format!("  {:.1}s", t));
+                                        }
+                                        if ui.button_with_size("Play", [cw - 12.0, 22.0]) {
+                                            self.on_event(&Event::KeyDown { key: Key::R }, ctx);
+                                        }
+                                    });
+                                col += 1;
+                                if col < cols { ui.same_line(); } else { col = 0; }
+                            }
+                        }
+                    });
+                    ui.set_cursor_pos([content_x, h - 20.0]);
+                    ui.text_colored([0.25, 0.27, 0.36, 0.7], "Models: Poly Pizza (poly.pizza) CC-BY");
+                }
+            });
     }
 }

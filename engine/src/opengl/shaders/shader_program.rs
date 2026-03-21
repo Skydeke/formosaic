@@ -100,11 +100,6 @@ impl<T: Processable> ShaderProgram<T> {
         }
     }
 
-    pub fn get_uniform_location(&self, name: &str) -> i32 {
-        let cname = CString::new(name).unwrap();
-        unsafe { gl::GetUniformLocation(self.id, cname.as_ptr()) }
-    }
-
     pub fn bind_attribute(&self, location: u32, name: &str) {
         let cname = CString::new(name).unwrap();
         unsafe { gl::BindAttribLocation(self.id, location, cname.as_ptr()) };
