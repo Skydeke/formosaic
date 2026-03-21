@@ -5,9 +5,7 @@
 //! 2. MenuRenderer            — custom OpenGL background + level grid (when in menu)
 //!                            — touch button overlay (Android, during gameplay)
 //! 3. ImguiGlRenderer         — interactive widgets on top of everything
-//!
-//! MenuRenderer uses the project's own OpenGL abstractions (SimpleProgram, Vao,
-//! Vbo) exclusively.  imgui provides the interactive widget layer on top.
+//!    (registered in the pipeline; prepare() is called before pipeline.draw())
 
 use winit::application::ApplicationHandler;
 use winit::event_loop::ActiveEventLoop;
@@ -56,9 +54,6 @@ pub struct GameEngine {
     // imgui — interactive widget layer
     imgui_ctx:       Option<imgui::Context>,
     imgui_platform:  Option<imgui_winit_support::WinitPlatform>,
-    imgui_renderer:  Option<ImguiGlRenderer>,
-    // Custom OpenGL menu background + touch buttons
-    menu_renderer:   Option<MenuRenderer>,
 }
 
 impl ApplicationHandler for GameEngine {
@@ -160,13 +155,10 @@ impl ApplicationHandler for GameEngine {
                             warmth:         o.warmth,
                             warmth_color:   o.warmth_color,
                             hint_tier:      o.tier.as_u8(),
-                            show_disc:      o.show_disc,
-                            disc_normal:    o.disc_normal,
-                            disc_center:    cgmath::Vector3::new(0.0_f32, 0.0, 0.0),
-                            disc_radius:    1.5,
                             solved:         game.is_solved(),
                             glow_intensity: glow,
                             time:           game.elapsed_secs(),
+                            ..Default::default()
                         }
                     } else {
                         HintFrameData {
@@ -177,52 +169,24 @@ impl ApplicationHandler for GameEngine {
                         }
                     };
 
-                    // ── 3D render pass ────────────────────────────────────
-                    self.pipeline.as_mut().unwrap().draw(size.width, size.height, &hint);
-
-                    // Drain any GL error left by the pipeline so it does not
-                    // pollute the checks below.
-                    let pipeline_err = unsafe { gl::GetError() };
-                    if pipeline_err != gl::NO_ERROR {
-                        log::error!("[Pipeline] GL 0x{:X}: {}", pipeline_err,
-                            Self::gl_error_to_string(pipeline_err));
-                    }
-
-                    // ── MenuRenderer ─────────────────────────────────────
-                    // Background-only: draws the dark backdrop + animated wire
-                    // mesh when in the menu, or touch buttons during gameplay.
-                    // All interactive UI is rendered by imgui on top.
-                    if let Some(mr) = &mut self.menu_renderer {
-                        if show_menu {
-                            mr.update(delta_time, pw, ph);
-                            mr.render_background(pw, ph);
-                        } else if is_touch {
-                            mr.render_touch_buttons(pw, ph);
-                        }
-                    }
-
-                    // ── imgui — interactive widgets over the top ──────────
-                    if let (Some(platform), Some(ctx), Some(renderer)) = (
+                    // ── imgui — build frame, embed draw data pointer in FrameData ─
+                    // ImguiGlRenderer is in the pipeline's renderer list.
+                    // We build the imgui frame here (where we have game + window),
+                    // store the DrawData pointer in FrameData, then pipeline.draw()
+                    // broadcasts FrameData to all renderers via IRenderer::prepare.
+                    let imgui_ptr: *const imgui::DrawData = if let (Some(platform), Some(ctx)) = (
                         &mut self.imgui_platform,
                         &mut self.imgui_ctx,
-                        &mut self.imgui_renderer,
                     ) {
-                        // On Android attach_window fires before the surface has
-                        // its final size, so display_size can be 0×0.
-                        // Force-sync every frame: imgui works in logical pixels;
-                        // framebuffer_scale converts them to physical pixels for
-                        // the scissor/projection maths in ImguiGlRenderer.
                         {
                             let io    = ctx.io_mut();
                             let scale = window.scale_factor() as f32;
                             io.display_size              = [pw / scale, ph / scale];
                             io.display_framebuffer_scale = [scale, scale];
                         }
-
                         platform.prepare_frame(ctx.io_mut(), window)
                             .expect("imgui frame prep failed");
                         let ui = ctx.frame();
-
                         Self::build_ui(
                             ui, game, pw / window.scale_factor() as f32,
                             ph / window.scale_factor() as f32,
@@ -230,16 +194,28 @@ impl ApplicationHandler for GameEngine {
                                 .expect("No scene context.").borrow_mut(),
                             show_menu, is_touch,
                         );
-
                         platform.prepare_render(ui, window);
-                        let draw_data = ctx.render();
-                        renderer.render(draw_data);
+                        ctx.render() as *const imgui::DrawData
+                    } else {
+                        std::ptr::null()
+                    };
 
-                        let imgui_err = unsafe { gl::GetError() };
-                        if imgui_err != gl::NO_ERROR {
-                            log::error!("[imgui] GL 0x{:X}: {}", imgui_err,
-                                Self::gl_error_to_string(imgui_err));
-                        }
+                    // ── Render: 3D scene + overlays + imgui (all via pipeline) ──
+                    let frame = HintFrameData {
+                        imgui_draw_data: imgui_ptr,
+                        delta_time,
+                        viewport_w: pw,
+                        viewport_h: ph,
+                        show_menu,
+                        is_touch,
+                        ..hint
+                    };
+                    self.pipeline.as_mut().unwrap().draw(size.width, size.height, &frame);
+
+                    let pipeline_err = unsafe { gl::GetError() };
+                    if pipeline_err != gl::NO_ERROR {
+                        log::error!("[Pipeline] GL 0x{:X}: {}", pipeline_err,
+                            Self::gl_error_to_string(pipeline_err));
                     }
 
                     let _ = gl_surface.swap_buffers(gl_context);
@@ -411,8 +387,7 @@ impl GameEngine {
             last_cursor_pos: (0.0, 0.0),
             last_frame_time: std::time::Instant::now(),
             fps_accumulator: 0.0, frame_count: 0,
-            imgui_ctx: None, imgui_platform: None, imgui_renderer: None,
-            menu_renderer: None,
+            imgui_ctx: None, imgui_platform: None,
         }
     }
 
@@ -806,12 +781,6 @@ impl GameEngine {
         let imgui_renderer = ImguiGlRenderer::new(&mut imgui)
             .map_err(|e| format!("imgui renderer: {}", e))?;
 
-        // ── MenuRenderer ──────────────────────────────────────────────────
-        let menu_renderer = match MenuRenderer::new() {
-            Ok(r)  => { log::info!("MenuRenderer initialised"); Some(r) }
-            Err(e) => { log::warn!("MenuRenderer init failed: {} — background disabled", e); None }
-        };
-
         // ── Game + pipeline ───────────────────────────────────────────────
         self.scene_context = Some(Rc::new(RefCell::new(SceneContext::new())));
         self.game = Some(Formosaic::new());
@@ -819,16 +788,18 @@ impl GameEngine {
             g.on_init(&mut self.scene_context.clone()
                 .expect("No scene context.").borrow_mut());
         }
-        self.pipeline = Some(Pipeline::new(
+        let mut pipeline = Pipeline::new(
             self.scene_context.clone().expect("No scene context."),
-        ));
+        );
+        // ImguiGlRenderer lives in the pipeline's renderer list.
+        // game_engine embeds the DrawData pointer in FrameData each frame.
+        pipeline.add_imgui_renderer(imgui_renderer);
+        self.pipeline = Some(pipeline);
 
         self.gl_context     = Some(gl_context);
         self.gl_surface     = Some(gl_surface);
         self.imgui_ctx      = Some(imgui);
         self.imgui_platform = Some(platform);
-        self.imgui_renderer = Some(imgui_renderer);
-        self.menu_renderer  = menu_renderer;
 
         unsafe {
             gl::Enable(gl::DEPTH_TEST);
@@ -839,8 +810,6 @@ impl GameEngine {
     }
 
     fn cleanup_gl(&mut self) {
-        self.menu_renderer  = None;
-        self.imgui_renderer = None;
         self.imgui_platform = None;
         self.imgui_ctx      = None;
         self.pipeline       = None;

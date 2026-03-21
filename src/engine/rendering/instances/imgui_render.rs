@@ -1,14 +1,18 @@
-//! Dear ImGui GL renderer.
+//! Dear ImGui GL renderer — implements `IRenderer`.
 //!
-//! ImGui drives its own draw loop via `DrawData` rather than going through
-//! `SceneContext`, so this renderer sits outside the `IRenderer` pipeline and
-//! is called directly from `GameEngine`.  It uses `SimpleProgram` — the right
-//! fit here because uniforms are computed from `DrawData` at call time, not
-//! extracted from scene state via `RenderState`.
+//! ImGui produces a `&DrawData` value that is only valid for the current frame,
+//! while `IRenderer::render` receives a `&SceneContext`.  We bridge this by
+//! calling `prepare(draw_data)` immediately after `ctx.render()` to cache a
+//! pointer to the draw data, then the pipeline calls `render()` normally.
 //!
-//! `uTexture` is a sampler bound once at construction (unit 0, never changes).
-//! `uProjMtx` is rebuilt each frame from `draw_data.display_size`.
+//! Shader source lives in `assets/shaders/imgui.{vert,frag}.glsl`.
+//!
+//! `uTexture` is bound to unit 0 once at construction and never changed.
+//! `uProjMtx` is rebuilt each frame from `DrawData::display_size`.
 
+use crate::engine::architecture::scene::scene_context::SceneContext;
+use crate::engine::rendering::abstracted::irenderer::{IRenderer, RenderPass};
+use crate::engine::rendering::pipeline::FrameData;
 use crate::opengl::{
     constants::{data_type::DataType, vbo_target::VboTarget, vbo_usage::VboUsage},
     fbos::simple_texture::SimpleTexture,
@@ -26,73 +30,44 @@ use crate::opengl::{
 use imgui::{DrawData, DrawIdx, DrawVert, TextureId};
 use std::mem;
 
-const VERT_SRC: &str = r#"#version 300 es
-precision mediump float;
-layout(location=0) in vec2 aPos;
-layout(location=1) in vec2 aUV;
-layout(location=2) in vec4 aColor;
-uniform mat4 uProjMtx;
-out vec2 vUV;
-out vec4 vColor;
-void main() {
-    vUV    = aUV;
-    vColor = aColor;
-    gl_Position = uProjMtx * vec4(aPos, 0.0, 1.0);
-}
-"#;
-
-const FRAG_SRC: &str = r#"#version 300 es
-precision mediump float;
-in vec2  vUV;
-in vec4  vColor;
-uniform sampler2D uTexture;
-out vec4 fragColor;
-void main() { fragColor = vColor * texture(uTexture, vUV); }
-"#;
-
 pub struct ImguiGlRenderer {
-    program:  SimpleProgram,
-    loc_proj: i32,
-    vao:      Vao,
-    vbo:      Vbo,
-    ebo:      Vbo,
-    /// Font texture — must stay alive for the lifetime of the renderer so the
-    /// GL texture object is not deleted while imgui still references its ID.
+    program:      SimpleProgram,
+    loc_proj:     i32,
+    vao:          Vao,
+    vbo:          Vbo,
+    ebo:          Vbo,
+    /// Pending draw data pointer — set by `prepare()`, consumed by `render()`.
+    pending:      Option<*const DrawData>,
+    /// Font texture — must outlive the renderer so imgui's texture ID stays valid.
     #[allow(dead_code)]
-    font_tex: SimpleTexture,
+    font_tex:     SimpleTexture,
 }
 
 impl ImguiGlRenderer {
     pub fn new(imgui: &mut imgui::Context) -> Result<Self, String> {
-        let program  = SimpleProgram::from_sources(VERT_SRC, FRAG_SRC)?;
+        let vert_src = include_str!("../../../../assets/shaders/imgui.vert.glsl");
+        let frag_src = include_str!("../../../../assets/shaders/imgui.frag.glsl");
+        let program  = SimpleProgram::from_sources(vert_src, frag_src)?;
         let loc_proj = program.uniform_location("uProjMtx");
 
-        // Bind the sampler uniform to texture unit 0 once at construction —
-        // it never changes, so there is no need to store or re-set it each frame.
+        // Bind sampler to unit 0 once — it never changes.
         program.bind();
         program.set_uniform_int(program.uniform_location("uTexture"), 0);
         program.unbind();
 
-        // DrawVert layout: pos(f32×2) + uv(f32×2) + col(u8×4) = 20 bytes
+        // DrawVert: pos(f32×2) + uv(f32×2) + col(u8×4) = 20 bytes
         let stride = mem::size_of::<DrawVert>() as i32;
 
-        // ── VAO must be bound FIRST, then VBOs created and bound inside it ──
-        // On GLES the EBO binding is part of VAO state — binding it before
-        // the VAO is active means it never gets captured, causing draw call
-        // failures (GL_INVALID_OPERATION) at runtime, especially on Adreno.
-        let vao = Vao::create(); // creates and auto-binds the VAO
-
+        // VAO must be bound before EBO — on GLES the EBO binding is VAO state.
+        let vao = Vao::create();
         let vbo = Vbo::create(VboTarget::ArrayBuffer,        VboUsage::StreamDraw);
         let ebo = Vbo::create(VboTarget::ElementArrayBuffer, VboUsage::StreamDraw);
-
-        // Bind both buffers while the VAO is active so their state is captured.
         vbo.bind();
-        ebo.bind(); // EBO captured into VAO here — critical for GLES
+        ebo.bind(); // captured into VAO here
 
-        // Vertex attribute pointers (VAO still bound).
         let a_pos = Attribute::of(0, 2, DataType::Float, false);
         let a_uv  = Attribute::of(1, 2, DataType::Float, false);
-        let a_col = Attribute::of(2, 4, DataType::UByte, true);  // normalised u8 colour
+        let a_col = Attribute::of(2, 4, DataType::UByte, true);
         a_pos.link(stride, 0);
         a_uv.link(stride, 8);
         a_col.link(stride, 16);
@@ -100,17 +75,13 @@ impl ImguiGlRenderer {
         Attribute::enable_index(1);
         Attribute::enable_index(2);
 
-        // Unbind in the right order: VAO first, then VBOs (so unbinding VBO
-        // doesn't accidentally clear the VAO's buffer bindings on some drivers).
         vao.unbind();
         vbo.unbind();
-        // NOTE: do NOT unbind the EBO while the VAO is unbound — on some GLES
-        // drivers that can corrupt the VAO's element buffer reference.
+        // Do NOT unbind EBO while VAO is unbound — can corrupt VAO state on some drivers.
 
-        // ── Font texture ──────────────────────────────────────────────────
+        // Font texture
         let mut font_tex = SimpleTexture::create();
         font_tex.bind();
-
         let configs = TextureConfigs {
             mag_filter: Some(MagFilterParameter::Linear),
             min_filter: Some(MinFilterParameter::Linear),
@@ -122,18 +93,16 @@ impl ImguiGlRenderer {
             )
         };
         font_tex.apply_configs(&configs);
-
         let atlas = imgui.fonts();
         let tex   = atlas.build_rgba32_texture();
         font_tex.upload_rgba8(tex.width as i32, tex.height as i32, tex.data);
         font_tex.unbind();
-
         imgui.fonts().tex_id = TextureId::new(font_tex.get_id() as usize);
 
-        Ok(Self { program, loc_proj, vao, vbo, ebo, font_tex })
+        Ok(Self { program, loc_proj, vao, vbo, ebo, pending: None, font_tex })
     }
 
-    pub fn render(&mut self, draw_data: &DrawData) {
+    fn draw(&mut self, draw_data: &DrawData) {
         let fb_w = draw_data.display_size[0] * draw_data.framebuffer_scale[0];
         let fb_h = draw_data.display_size[1] * draw_data.framebuffer_scale[1];
         if fb_w <= 0.0 || fb_h <= 0.0 { return; }
@@ -143,13 +112,12 @@ impl ImguiGlRenderer {
 
         #[rustfmt::skip]
         let proj: [f32; 16] = [
-             2.0/(dr-dl),       0.0,          0.0, 0.0,
-             0.0,         2.0/(dt-db),         0.0, 0.0,
-             0.0,               0.0,          -1.0, 0.0,
-            (dr+dl)/(dl-dr),(dt+db)/(db-dt),   0.0, 1.0,
+             2.0/(dr-dl),        0.0,          0.0, 0.0,
+             0.0,          2.0/(dt-db),         0.0, 0.0,
+             0.0,                0.0,          -1.0, 0.0,
+            (dr+dl)/(dl-dr), (dt+db)/(db-dt),   0.0, 1.0,
         ];
 
-        // Save scissor state
         let mut prev_scissor = [0i32; 4];
         let prev_scissor_test = unsafe { gl::IsEnabled(gl::SCISSOR_TEST) };
         unsafe { gl::GetIntegerv(gl::SCISSOR_BOX, prev_scissor.as_mut_ptr()); }
@@ -186,12 +154,12 @@ impl ImguiGlRenderer {
                         let ch = (cmd_params.clip_rect[3] - clip_off[1]) * clip_scale[1];
                         if cw <= cx || ch <= cy { continue; }
 
-                        unsafe { gl::Scissor(cx as i32, (fb_h-ch) as i32, (cw-cx) as i32, (ch-cy) as i32); }
-
-                        let tex_id = cmd_params.texture_id.id() as u32;
                         unsafe {
+                            gl::Scissor(cx as i32, (fb_h-ch) as i32,
+                                        (cw-cx) as i32, (ch-cy) as i32);
                             gl::ActiveTexture(gl::TEXTURE0);
-                            gl::BindTexture(gl::TEXTURE_2D, tex_id);
+                            gl::BindTexture(gl::TEXTURE_2D,
+                                            cmd_params.texture_id.id() as u32);
                         }
 
                         let idx_type = if mem::size_of::<DrawIdx>() == 2 {
@@ -224,4 +192,31 @@ impl ImguiGlRenderer {
             gl::Scissor(prev_scissor[0], prev_scissor[1], prev_scissor[2], prev_scissor[3]);
         }
     }
+}
+
+impl IRenderer for ImguiGlRenderer {
+    fn pass(&self) -> RenderPass { RenderPass::Overlay }
+
+    /// Receives the imgui draw data pointer from `FrameData`.
+    fn prepare(&mut self, data: &FrameData) {
+        self.pending = if data.imgui_draw_data.is_null() {
+            None
+        } else {
+            Some(data.imgui_draw_data)
+        };
+    }
+
+    fn render(&mut self, _context: &SceneContext) {
+        if let Some(ptr) = self.pending.take() {
+            // SAFETY: pointer came from FrameData::imgui_draw_data, which was set
+            // from a live &DrawData borrow in game_engine.  It remains valid until
+            // the next imgui_ctx.render() call, which cannot happen before this
+            // render() returns.
+            let draw_data = unsafe { &*ptr };
+            self.draw(draw_data);
+        }
+    }
+
+    fn any_processed(&self) -> bool { self.pending.is_some() }
+    fn finish(&mut self) {}
 }

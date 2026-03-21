@@ -8,7 +8,8 @@
 //! `render_touch_buttons` / `hit_test_touch_buttons`.
 
 use crate::engine::architecture::scene::scene_context::SceneContext;
-use crate::engine::rendering::abstracted::irenderer::IRenderer;
+use crate::engine::rendering::abstracted::irenderer::{IRenderer, RenderPass};
+use crate::engine::rendering::pipeline::FrameData;
 use crate::opengl::{
     constants::{data_type::DataType, vbo_target::VboTarget, vbo_usage::VboUsage},
     objects::{attribute::Attribute, vao::Vao, vbo::Vbo},
@@ -58,35 +59,24 @@ impl Batch {
 
 // ─── Renderer ─────────────────────────────────────────────────────────────────
 pub struct MenuRenderer {
-    program:   SimpleProgram,
-    loc_res:   i32,
-    vao:       Vao,
-    vbo:       Vbo,
-    batch:     Batch,
-    particles: Vec<Particle>,
+    program:    SimpleProgram,
+    loc_res:    i32,
+    vao:        Vao,
+    vbo:        Vbo,
+    batch:      Batch,
+    particles:  Vec<Particle>,
+    // Frame state set via IRenderer::prepare each frame.
+    show_menu:  bool,
+    is_touch:   bool,
+    viewport_w: f32,
+    viewport_h: f32,
+    delta_time: f32,
 }
 
 impl MenuRenderer {
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
-        let vert_src = r#"#version 300 es
-precision mediump float;
-layout(location=0) in vec2 aPos;
-layout(location=1) in vec4 aCol;
-uniform vec2 uRes;
-out vec4 vCol;
-void main() {
-    vec2 ndc = (aPos / uRes) * 2.0 - 1.0;
-    ndc.y = -ndc.y;
-    gl_Position = vec4(ndc, 0.0, 1.0);
-    vCol = aCol;
-}
-"#;
-        let frag_src = r#"#version 300 es
-precision mediump float;
-in vec4 vCol;
-out vec4 fragColor;
-void main() { fragColor = vCol; }
-"#;
+        let vert_src = include_str!("../../../../assets/shaders/menu.vert.glsl");
+        let frag_src = include_str!("../../../../assets/shaders/menu.frag.glsl");
         let program  = SimpleProgram::from_sources(vert_src, frag_src)
             .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
         let loc_res  = program.uniform_location("uRes");
@@ -113,6 +103,11 @@ void main() { fragColor = vCol; }
             vao, vbo,
             batch: Batch::new(),
             particles: Vec::new(),
+            show_menu:  false,
+            is_touch:   false,
+            viewport_w: 1.0,
+            viewport_h: 1.0,
+            delta_time: 0.0,
         })
     }
 
@@ -286,7 +281,26 @@ void main() { fragColor = vCol; }
 }
 
 impl IRenderer for MenuRenderer {
-    fn render(&mut self, _ctx: &SceneContext) {}
-    fn any_processed(&self) -> bool { false }
+    fn pass(&self) -> RenderPass { RenderPass::Late }
+
+    fn prepare(&mut self, data: &FrameData) {
+        self.show_menu  = data.show_menu;
+        self.is_touch   = data.is_touch;
+        self.viewport_w = data.viewport_w;
+        self.viewport_h = data.viewport_h;
+        self.delta_time = data.delta_time;
+    }
+
+    fn render(&mut self, _ctx: &SceneContext) {
+        let (w, h) = (self.viewport_w, self.viewport_h);
+        if self.show_menu {
+            self.update(self.delta_time, w, h);
+            self.render_background(w, h);
+        } else if self.is_touch {
+            self.render_touch_buttons(w, h);
+        }
+    }
+
+    fn any_processed(&self) -> bool { self.show_menu || self.is_touch }
     fn finish(&mut self) {}
 }

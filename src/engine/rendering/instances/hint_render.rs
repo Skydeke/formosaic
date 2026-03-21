@@ -1,11 +1,11 @@
 //! Hint overlay renderer (Tier 1+).
 //!
 //! Renders a fullscreen-quad warmth compass.  All uniforms go through the
-//! ShaderProgram<T> adapter system — no raw gl::Uniform* calls, no manually
-//! cached location integers.
+//! ShaderProgram<T> adapter system — no raw gl::Uniform* calls.
 
 use crate::engine::architecture::scene::scene_context::SceneContext;
-use crate::engine::rendering::abstracted::irenderer::IRenderer;
+use crate::engine::rendering::abstracted::irenderer::{IRenderer, RenderPass};
+use crate::engine::rendering::pipeline::FrameData;
 use crate::engine::rendering::abstracted::processable::NoopProcessable;
 use crate::opengl::{
     constants::data_type::DataType,
@@ -19,7 +19,6 @@ use cgmath::Vector3;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-/// Shared frame state read by the per-render uniform extractors.
 struct FrameState {
     warmth_color: Vector3<f32>,
     warmth:       f32,
@@ -27,7 +26,7 @@ struct FrameState {
     time:         f32,
 }
 
-pub struct HudRenderer {
+pub struct HintRenderer {
     vao:    Vao,
     shader: ShaderProgram<NoopProcessable>,
     frame:  Rc<RefCell<FrameState>>,
@@ -38,7 +37,7 @@ pub struct HudRenderer {
     pub active:       bool,
 }
 
-impl HudRenderer {
+impl HintRenderer {
     pub fn new() -> Result<Self, Box<dyn std::error::Error>> {
         #[rustfmt::skip]
         let verts: [f32; 12] = [
@@ -55,8 +54,8 @@ impl HudRenderer {
         let attr    = Attribute::of(0, 2, DataType::Float, false);
         vao.load_data_buffer(Rc::new(buf) as Rc<dyn IVbo>, &[attr]);
 
-        let vert_src = include_str!("../../../../assets/shaders/hud.vert.glsl");
-        let frag_src = include_str!("../../../../assets/shaders/hud.frag.glsl");
+        let vert_src = include_str!("../../../../assets/shaders/hint.vert.glsl");
+        let frag_src = include_str!("../../../../assets/shaders/hint.frag.glsl");
         let mut shader = ShaderProgram::<NoopProcessable>::from_sources(vert_src, frag_src)?;
 
         let frame = Rc::new(RefCell::new(FrameState {
@@ -98,31 +97,31 @@ impl HudRenderer {
         }
 
         Ok(Self {
-            vao,
-            shader,
-            frame,
+            vao, shader, frame,
             warmth_color: [1.0, 1.0, 1.0],
-            warmth:    0.0,
-            hint_tier: 0.0,
-            time:      0.0,
-            active:    false,
+            warmth: 0.0, hint_tier: 0.0, time: 0.0, active: false,
         })
     }
 }
 
-impl IRenderer for HudRenderer {
-    fn render(&mut self, _context: &SceneContext) {
-        if !self.active || self.hint_tier < 0.5 {
-            return;
-        }
+impl IRenderer for HintRenderer {
+    fn pass(&self) -> RenderPass { RenderPass::Overlay }
 
-        // Sync public fields into the shared frame state the extractors read.
+    fn prepare(&mut self, data: &FrameData) {
+        self.active       = data.hint_tier >= 1;
+        self.warmth       = data.warmth;
+        self.warmth_color = data.warmth_color;
+        self.hint_tier    = data.hint_tier as f32;
+        self.time         = data.time;
+    }
+
+    fn render(&mut self, _context: &SceneContext) {
+        if !self.active || self.hint_tier < 0.5 { return; }
+
         {
             let mut f = self.frame.borrow_mut();
             f.warmth_color = Vector3::new(
-                self.warmth_color[0],
-                self.warmth_color[1],
-                self.warmth_color[2],
+                self.warmth_color[0], self.warmth_color[1], self.warmth_color[2],
             );
             f.warmth    = self.warmth;
             f.hint_tier = self.hint_tier;
@@ -136,7 +135,6 @@ impl IRenderer for HudRenderer {
         }
 
         self.shader.bind();
-        // Screenspace pass: no camera, no scene instance.
         let state = RenderState::new_screenspace(self);
         self.shader.update_per_render_uniforms(&state);
 
