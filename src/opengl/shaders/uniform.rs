@@ -181,6 +181,34 @@ impl Uniform<Option<Rc<dyn Texture>>> for UniformTexture {
     }
 }
 
+pub struct UniformVec2 {
+    name: String,
+    location: i32,
+}
+
+impl UniformVec2 {
+    pub fn new(name: &str) -> Self {
+        Self { name: name.to_string(), location: -1 }
+    }
+}
+
+impl Uniform<cgmath::Vector2<f32>> for UniformVec2 {
+    fn initialize(&mut self, program_id: u32) {
+        let cname = CString::new(self.name.clone()).unwrap();
+        self.location = unsafe { gl::GetUniformLocation(program_id, cname.as_ptr()) };
+        if self.location == -1 {
+            log::warn!("Uniform '{}' not found in shader program", self.name);
+        }
+    }
+
+    fn load(&self, vector: &cgmath::Vector2<f32>) {
+        if self.location != -1 {
+            unsafe { gl::Uniform2f(self.location, vector.x, vector.y); }
+        }
+    }
+}
+
+
 pub struct UniformVec3 {
     name: String,
     location: i32,

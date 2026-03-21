@@ -1,13 +1,12 @@
 //! A simple compiled and linked shader program without the type-parameterized
-//! uniform system of ShaderProgram<T>. Used for custom renderers (e.g. imgui)
-//! that manage their own uniforms.
+//! uniform system of ShaderProgram<T>. Used for custom renderers (e.g. imgui,
+//! menu) that manage their own uniforms imperatively.
 
 use crate::opengl::shaders::shader::Shader;
 use std::ffi::CString;
 
 pub struct SimpleProgram {
-    id:    u32,
-    owned: bool,   // false = borrowed view — do NOT delete in drop
+    id: u32,
 }
 
 impl SimpleProgram {
@@ -27,14 +26,7 @@ impl SimpleProgram {
             }
             id
         };
-        Ok(Self { id, owned: true })
-    }
-
-    /// Borrow an existing GL program id without taking ownership.
-    /// The caller is responsible for ensuring the program outlives this proxy.
-    /// The proxy will NOT delete the program on drop.
-    pub fn from_id(id: u32) -> Self {
-        Self { id, owned: false }
+        Ok(Self { id })
     }
 
     pub fn bind(&self) {
@@ -85,8 +77,6 @@ impl SimpleProgram {
 
 impl Drop for SimpleProgram {
     fn drop(&mut self) {
-        if self.owned {
-            unsafe { gl::DeleteProgram(self.id); }
-        }
+        unsafe { gl::DeleteProgram(self.id); }
     }
 }
