@@ -51,6 +51,9 @@ pub struct FrameData {
     pub show_menu:       bool,
     /// Whether the platform is touch-only (Android).
     pub is_touch:        bool,
+    /// GL texture ID of the albedo G-buffer attachment (index 0).
+    /// Alpha channel is 0 for sky/unwritten pixels, 1 for model pixels.
+    pub albedo_tex_id:   u32,
     /// GL texture ID of the world-space position G-buffer attachment.
     /// Used by screen-space overlay renderers (e.g. ShineRenderer).
     /// 0 = not available.
@@ -74,6 +77,7 @@ impl Default for FrameData {
             viewport_h:      1.0,
             show_menu:       false,
             is_touch:        false,
+            albedo_tex_id:   0,
             position_tex_id: 0,
             imgui_draw_data: std::ptr::null(),
         }
@@ -152,6 +156,11 @@ impl Pipeline {
         }
 
         // Inject the G-buffer position texture ID so overlay renderers can sample it.
+        let albedo_tex_id = self.deferred_fbo
+            .get_attachments()
+            .get(0)
+            .map(|a| a.get_texture().get_id())
+            .unwrap_or(0);
         let pos_tex_id = self.deferred_fbo
             .get_attachments()
             .get(2)
@@ -172,6 +181,7 @@ impl Pipeline {
             viewport_h:      frame.viewport_h,
             show_menu:       frame.show_menu,
             is_touch:        frame.is_touch,
+            albedo_tex_id:   albedo_tex_id,
             position_tex_id: pos_tex_id,
             imgui_draw_data: frame.imgui_draw_data,
         };
@@ -191,7 +201,14 @@ impl Pipeline {
 
     fn geometry_pass(&mut self) {
         self.deferred_fbo.bind(FboTarget::DrawFramebuffer);
-        unsafe { gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT | gl::STENCIL_BUFFER_BIT); }
+        // Clear with alpha=0 so unwritten (sky) pixels have gAlbedo.a=0.
+        // The geometry shader only outputs alpha=1 for actual model fragments,
+        // so overlays can use alpha to distinguish model from sky.
+        unsafe {
+            gl::ClearColor(0.0, 0.0, 0.0, 0.0);
+            gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT | gl::STENCIL_BUFFER_BIT);
+            gl::ClearColor(0.02, 0.03, 0.05, 1.0); // restore for default framebuffer
+        }
         self.context.borrow_mut().update();
         let ctx = self.context.borrow();
         for r in &mut self.renderers {

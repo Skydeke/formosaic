@@ -20,7 +20,8 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 struct FrameState {
-    solved_timer: f32,   // -1.0 = not solved
+    solved_timer:    f32,   // -1.0 = not solved
+    albedo_tex_id:   u32,
     position_tex_id: u32,
 }
 
@@ -28,6 +29,7 @@ pub struct ShineRenderer {
     vao:    Vao,
     shader: ShaderProgram<NoopProcessable>,
     frame:  Rc<RefCell<FrameState>>,
+    loc_albedo:   i32,
     loc_position: i32,
 }
 
@@ -55,10 +57,12 @@ impl ShineRenderer {
         let mut shader = ShaderProgram::<NoopProcessable>::from_sources(vert_src, frag_src)?;
 
         // Bind sampler unit 0 once at construction — position texture always on unit 0.
+        let loc_albedo   = shader.get_uniform_location("uAlbedo");
         let loc_position = shader.get_uniform_location("uPosition");
 
         let frame = Rc::new(RefCell::new(FrameState {
             solved_timer:    -1.0,
+            albedo_tex_id:   0,
             position_tex_id: 0,
         }));
 
@@ -73,7 +77,7 @@ impl ShineRenderer {
         }
 
         log::info!("ShineRenderer initialised");
-        Ok(Self { vao, shader, frame, loc_position })
+        Ok(Self { vao, shader, frame, loc_albedo, loc_position })
     }
 }
 
@@ -83,13 +87,14 @@ impl IRenderer for ShineRenderer {
     fn prepare(&mut self, data: &FrameData) {
         let mut f = self.frame.borrow_mut();
         f.solved_timer    = if data.solved { data.time } else { -1.0 };
+        f.albedo_tex_id   = data.albedo_tex_id;
         f.position_tex_id = data.position_tex_id;
     }
 
     fn render(&mut self, _context: &SceneContext) {
-        let (timer, pos_tex) = {
+        let (timer, albedo_tex, pos_tex) = {
             let f = self.frame.borrow();
-            (f.solved_timer, f.position_tex_id)
+            (f.solved_timer, f.albedo_tex_id, f.position_tex_id)
         };
 
         if timer < 0.0 || pos_tex == 0 { return; }
@@ -99,15 +104,19 @@ impl IRenderer for ShineRenderer {
             gl::Enable(gl::BLEND);
             gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
 
-            // Bind position texture to unit 0
+            // Bind position on unit 0, albedo on unit 1
             gl::ActiveTexture(gl::TEXTURE0);
             gl::BindTexture(gl::TEXTURE_2D, pos_tex);
+            gl::ActiveTexture(gl::TEXTURE1);
+            gl::BindTexture(gl::TEXTURE_2D, albedo_tex);
         }
 
         self.shader.bind();
 
-        // Set sampler uniform directly — it's a constant (unit 0) so no adapter needed
-        unsafe { gl::Uniform1i(self.loc_position, 0); }
+        unsafe {
+            gl::Uniform1i(self.loc_position, 0);
+            gl::Uniform1i(self.loc_albedo,   1);
+        }
 
         let state = RenderState::new_screenspace(self);
         self.shader.update_per_render_uniforms(&state);
@@ -122,6 +131,9 @@ impl IRenderer for ShineRenderer {
         unsafe {
             gl::Enable(gl::DEPTH_TEST);
             gl::Disable(gl::BLEND);
+            gl::ActiveTexture(gl::TEXTURE1);
+            gl::BindTexture(gl::TEXTURE_2D, 0);
+            gl::ActiveTexture(gl::TEXTURE0);
             gl::BindTexture(gl::TEXTURE_2D, 0);
         }
     }
