@@ -1,0 +1,48 @@
+# ─── Cargo configuration for Formosaic ───────────────────────────────────────
+#
+# Desktop:
+#   cargo desktop              Build + run debug
+#   cargo desktop-release      Build + run release
+#   cargo build-desktop        Build debug (no run)
+#   cargo build-desktop-release  Build release (no run)
+#
+# Android (all routed through xtask which sets BINDGEN_EXTRA_CLANG_ARGS etc.):
+#   cargo android              Build + install + run debug APK
+#   cargo android-release      Build + install + run release APK
+#   cargo build-android        Build debug APK only
+#   cargo build-android-release  Build release APK only
+#
+# Tooling:
+#   cargo setup-android        Download SDK/NDK, install Rust targets + cargo-apk
+#   cargo check-android        Verify the Android toolchain is ready
+#   cargo clean-all            Remove all build artefacts
+
+[alias]
+# Desktop — run directly, no env gymnastics needed
+desktop                 = "run   -p formosaic --example desktop"
+desktop-release         = "run   -p formosaic --example desktop --release"
+build-desktop           = "build -p formosaic --example desktop"
+build-desktop-release   = "build -p formosaic --example desktop --release"
+
+# Android — routed through xtask so BINDGEN_EXTRA_CLANG_ARGS is set correctly
+# in the process environment before cargo-apk runs.  Direct cargo-apk calls
+# cannot set these because config.toml [env] values with `relative = true`
+# mangle multi-word strings, and static absolute paths break on other machines.
+android                 = "run -p xtask -- android"
+android-release         = "run -p xtask -- android-release"
+build-android           = "run -p xtask -- build-android"
+build-android-release   = "run -p xtask -- build-android-release"
+
+# xtask utilities
+setup-android           = "run -p xtask -- setup-android"
+check-android           = "run -p xtask -- check-android"
+clean-all               = "run -p xtask -- clean-all"
+
+# ── Environment ───────────────────────────────────────────────────────────────
+# SDK/NDK paths for the local .android/ install.  `force = false` lets CI
+# override them.  Android build env (BINDGEN_EXTRA_CLANG_ARGS etc.) is set
+# by xtask at runtime, not here, because it requires derived absolute paths.
+[env]
+ANDROID_HOME     = { value = ".android/sdk",                  relative = true, force = false }
+ANDROID_NDK_HOME = { value = ".android/sdk/ndk/25.2.9519653", relative = true, force = false }
+ANDROID_NDK_ROOT = { value = ".android/sdk/ndk/25.2.9519653", relative = true, force = false }

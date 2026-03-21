@@ -1,0 +1,11 @@
+[package]
+name    = "xtask"
+version = "0.1.0"
+edition = "2021"
+
+# xtask is never published and never a dependency — it's a local dev tool only.
+publish = false
+
+[[bin]]
+name = "xtask"
+path = "src/main.rs"

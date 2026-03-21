@@ -4,42 +4,40 @@ stages:
 variables:
   CARGO_TERM_COLOR: always
 
-linux_release:
-  stage: build
-  image: rust:latest
-  script:
-    - apt-get update && apt-get install -y --no-install-recommends curl unzip openjdk-21-jdk-headless ca-certificates pkg-config libssl-dev build-essential cmake clang libclang-dev
-    - make setup-android
-    - make build-release
-  artifacts:
-    name: "linux-desktop-release"
-    paths:
-      - target/release/examples/desktop
-    expire_in: 1 week
-  only:
-    - branches
-    - tags
-    - merge_requests
-
-android_apk:
-  stage: build
+.setup: &setup
   image: rust:latest
   before_script:
     - apt-get update
-    - apt-get install -y --no-install-recommends curl unzip openjdk-21-jdk-headless ca-certificates pkg-config libssl-dev build-essential cmake clang libclang-dev
-  script:
-    - make setup-android
-    - echo "$ANDROID_KEYSTORE_B64" | base64 -d > release.keystore
-    - make android-build
-    - make android-release-build
-  artifacts:
-    name: "android-apks"
-    paths:
-    - target/debug/apk/**/*.apk
-    - target/release/apk/**/*.apk
-    expire_in: 1 week
+    - apt-get install -y --no-install-recommends
+        curl unzip openjdk-21-jdk-headless ca-certificates
+        pkg-config libssl-dev build-essential cmake clang libclang-dev
+    - cargo setup-android
   only:
     - branches
     - tags
     - merge_requests
 
+linux_release:
+  <<: *setup
+  stage: build
+  script:
+    - cargo build-desktop-release
+  artifacts:
+    name: linux-desktop-release
+    paths:
+      - target/release/examples/desktop
+    expire_in: 1 week
+
+android_apk:
+  <<: *setup
+  stage: build
+  script:
+    - echo "$ANDROID_KEYSTORE_B64" | base64 -d > game/release.keystore
+    - cargo build-android
+    - cargo build-android-release
+  artifacts:
+    name: android-apks
+    paths:
+      - target/debug/apk/**/*.apk
+      - target/release/apk/**/*.apk
+    expire_in: 1 week

@@ -1,99 +1,80 @@
 # Formosaic
 
-**Formosaic** (from *Form + Mosaic*) is a simple OpenGL ES game written in Rust, designed to help me learn Rust and graphics programming while having fun.  
-In the game, your goal is to find the correct viewing angle to assemble low-poly artwork fragments into a complete image.
-
----
-
-## Features
-
-- Cross-platform: runs on **Linux** and **Android**
-- Minimal OpenGL ES 2.0/3.0 rendering pipeline
-- Input and window management via **winit** + **glutin**
-- Clean and extendable Rust project structure
-- Continuous Integration:
-  - **GitHub** and **GitLab** pipelines build both Linux and Android versions
-  - Android release builds are signed using a key provided via **CI Secrets**
+**Formosaic** (from *Form + Mosaic*) is a puzzle game written in Rust and OpenGL ES. Your goal is to find the correct viewing angle that assembles scattered low-poly fragments into a complete 3D model.
 
 ---
 
 ## Project Structure
 
-- `src/` – Rust source files  
-- `examples/` – Platform-specific code  
-- `.android/` – Local Android SDK/NDK installation (created by `make setup-android`)  
-- `Makefile` – Build system for Linux and Android targets  
+```
+formosaic/
+  engine/     formosaic-engine crate — generic rendering engine, zero game knowledge
+  game/       formosaic crate — game logic, platform hosting, puzzles
+  xtask/      cargo xtask — project automation (Android setup, etc.)
+```
+
+Dependency direction is strictly one-way: `game → engine`. The compiler enforces this.
 
 ---
 
-## Build & Run
+## Building & Running
 
-The project uses a **Makefile** for simplified builds and running.
+### Prerequisites
 
-### Linux
+- [Rust](https://rustup.rs/) (stable)
+- On Linux: `pkg-config libssl-dev build-essential cmake clang libclang-dev`
 
-```bash
-# Setup Android SDK/NDK Headers to compile against
-make setup-android
+### Desktop (Linux)
 
-# Build and run the desktop version
-make run
+```sh
+# Debug
+cargo desktop
 
-# Build and run with debug logging
-make debug
-
-# Build and run release version
-make release
+# Release
+cargo desktop-release
 ```
 
 ### Android
 
-> Requires a device with USB debugging enabled
+First, set up the local Android SDK/NDK (one-time, downloads into `.android/`):
 
-```bash
-# Setup Android SDK/NDK and Rust targets
-make setup-android
-
-# Check that the Android environment is correctly installed
-make check-android
-
-# Build and install debug APK on connected device
-make android-debug
-
-# Build and install release APK
-make android-release
+```sh
+cargo setup-android
 ```
 
-### Clean Build Artifacts
+Verify the toolchain is ready:
 
-```bash
-make clean
+```sh
+cargo check-android
+```
+
+Then, with a device connected via USB (USB debugging enabled):
+
+```sh
+# Debug build + install + run
+cargo android
+
+# Release build + install + run
+cargo android-release
+```
+
+### Build only (no run)
+
+```sh
+cargo build-desktop           # desktop debug
+cargo build-desktop-release   # desktop release
+cargo build-android           # Android debug APK
+cargo build-android-release   # Android release APK
+```
+
+### Clean
+
+```sh
+cargo clean-all
 ```
 
 ---
 
-## Notes
+## CI
 
-Formosaic currently renders a simple placeholder scene and demonstrates:  
-- Window creation  
-- OpenGL ES context setup  
-- Input handling on desktop and mobile  
-
-Planned improvements include:  
-- Loading and displaying 3D fragment pieces  
-- Interactive rotation via mouse or touch  
-- Detecting when the puzzle is correctly assembled  
-
----
-
-## Help
-
-For a full list of Makefile commands:
-
-```bash
-make help
-```
-
-This will display all targets, including setup, Android builds, Linux builds, and cleaning commands.
-
----
+GitHub Actions and GitLab CI pipelines build both targets on every push. Release APKs are signed using a keystore provided via CI secrets (`ANDROID_KEYSTORE_B64`).

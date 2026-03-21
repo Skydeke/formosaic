@@ -1,39 +1,14 @@
-name: Build Formosaic (Linux + Android)
+name: Build Formosaic
 
 on:
   push:
-    branches: [ main ]
-    tags: [ "v*", "release-*" ]
+    branches: [main]
+    tags: ["v*", "release-*"]
   pull_request:
 
 jobs:
   linux-release:
-    name: Linux desktop (release build-only)
-    runs-on: ubuntu-latest
-    container:
-      image: rust:latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install dependencies
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends curl unzip openjdk-21-jdk-headless ca-certificates pkg-config libssl-dev build-essential cmake clang libclang-dev
-
-      - name: Set up Android SDK/NDK & cargo-apk
-        run: make setup-android
-
-      - name: Build Linux release
-        run: make build-release
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-desktop-release
-          path: target/release/examples/desktop
-
-  android-apk:
-    name: Android APKs (debug & release)
+    name: Linux desktop (release)
     runs-on: ubuntu-latest
     container:
       image: rust:latest
@@ -43,21 +18,50 @@ jobs:
       - name: Install system dependencies
         run: |
           apt-get update
-          apt-get install -y --no-install-recommends curl unzip openjdk-21-jdk-headless ca-certificates pkg-config libssl-dev build-essential cmake clang libclang-dev
+          apt-get install -y --no-install-recommends \
+            curl unzip openjdk-21-jdk-headless ca-certificates \
+            pkg-config libssl-dev build-essential cmake clang libclang-dev
 
-      - name: Set up Android SDK/NDK & cargo-apk
-        run: make setup-android
+      - name: Set up Android SDK/NDK
+        run: cargo setup-android
+
+      - name: Build desktop release
+        run: cargo build-desktop-release
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-desktop-release
+          path: target/release/examples/desktop
+
+  android-apk:
+    name: Android APKs (debug + release)
+    runs-on: ubuntu-latest
+    container:
+      image: rust:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            curl unzip openjdk-21-jdk-headless ca-certificates \
+            pkg-config libssl-dev build-essential cmake clang libclang-dev
+
+      - name: Set up Android SDK/NDK
+        run: cargo setup-android
 
       - name: Restore release keystore
         env:
           ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
-        run: echo "$ANDROID_KEYSTORE_B64" | base64 -d > release.keystore
+        run: echo "$ANDROID_KEYSTORE_B64" | base64 -d > game/release.keystore
 
       - name: Build APK (debug)
-        run: make android-build
+        run: cargo build-android
 
       - name: Build APK (release)
-        run: make android-release-build
+        run: cargo build-android-release
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4
@@ -66,5 +70,3 @@ jobs:
           path: |
             target/debug/apk/**/*.apk
             target/release/apk/**/*.apk
-
-
