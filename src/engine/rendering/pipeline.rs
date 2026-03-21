@@ -7,12 +7,10 @@ use crate::{
                 disc_render::DiscRenderer,
                 entity_render::EntityRenderer,
                 hud_render::HudRenderer,
-                menu_render::{MenuFrameData, MenuPanel, MenuRenderer},
                 outline_render::OutlineRenderer,
             },
         },
     },
-    level::storage::LevelMeta,
     opengl::{
         constants::{data_type::DataType, format_type::FormatType},
         fbos::{
@@ -47,14 +45,6 @@ pub struct HintFrameData {
     pub solved:        bool,
     pub glow_intensity: f32,
     pub time:          f32,
-    // Menu
-    pub show_menu:      bool,
-    pub menu_panel:     MenuPanel,
-    pub levels:         Vec<LevelMeta>,
-    pub selected_level: usize,
-    pub is_downloading: bool,
-    /// Show on-screen touch buttons during gameplay (for Android/touch)
-    pub show_touch_btns: bool,
 }
 
 impl Default for HintFrameData {
@@ -70,12 +60,6 @@ impl Default for HintFrameData {
             solved: false,
             glow_intensity: 0.0,
             time: 0.0,
-            show_menu:     false,
-            menu_panel:    MenuPanel::Levels,
-            levels:        Vec::new(),
-            selected_level: 0,
-            is_downloading: false,
-            show_touch_btns: false,
         }
     }
 }
@@ -89,7 +73,6 @@ pub struct Pipeline {
     outline:      Option<OutlineRenderer>,
     disc:         Option<DiscRenderer>,
     hud:          Option<HudRenderer>,
-    menu:         Option<MenuRenderer>,
 }
 
 impl Pipeline {
@@ -104,8 +87,6 @@ impl Pipeline {
             .map_err(|e| log::warn!("DiscRenderer: {}", e)).ok();
         let hud     = HudRenderer::new()
             .map_err(|e| log::warn!("HudRenderer: {}", e)).ok();
-        let menu    = MenuRenderer::new()
-            .map_err(|e| log::warn!("MenuRenderer: {}", e)).ok();
 
         let mut pipeline = Self {
             renderers: Vec::new(),
@@ -116,7 +97,6 @@ impl Pipeline {
             outline,
             disc,
             hud,
-            menu,
         };
 
         pipeline.add_renderer(Box::new(
@@ -200,17 +180,13 @@ impl Pipeline {
     }
 
     fn overlay_pass(&mut self, hint: &HintFrameData) {
-        // ── Reset GL state after deferred compute + blit ─────────────────
-        // Compute pass leaves image units active and ReadFramebuffer bound.
-        // Reset to clean state before any forward overlay draw calls.
+        // ── Reset GL state after the lighting blit ────────────────────────
+        // Image units are already cleared at the end of LightingPass::execute().
+        // We just need to ensure the default framebuffer is bound and raster
+        // state is clean before forward-render draw calls.
         unsafe {
             gl::BindFramebuffer(gl::FRAMEBUFFER, 0);
-            gl::MemoryBarrier(gl::ALL_BARRIER_BITS);
             gl::UseProgram(0);
-            // Unbind compute shader image units to prevent DrawArrays conflicts
-            for unit in 0u32..4 {
-                gl::BindImageTexture(unit, 0, 0, gl::FALSE, 0, gl::READ_ONLY, gl::RGBA8);
-            }
             gl::Enable(gl::DEPTH_TEST);
             gl::DepthMask(gl::TRUE);
             gl::Enable(gl::CULL_FACE);
@@ -246,32 +222,7 @@ impl Pipeline {
             h.render(&self.context.borrow());
         }
 
-        // In-game menu overlay
-        if hint.show_menu {
-            let res = self.context.borrow().get_camera().borrow().resolution;
-            let (w, h_px) = (res.x as f32, res.y as f32);
-            if let Some(menu) = &mut self.menu {
-                menu.update(hint.time, w, h_px);
-                let menu_data = MenuFrameData {
-                    active:         true,
-                    panel:          hint.menu_panel,
-                    levels:         &hint.levels,
-                    selected_level: hint.selected_level,
-                    is_downloading: hint.is_downloading,
-                    time:           hint.time,
-                };
-                menu.render_menu(&menu_data, w, h_px);
-            }
-        }
 
-        // On-screen touch buttons (shown during gameplay on touch devices)
-        if hint.show_touch_btns && !hint.show_menu {
-            let res = self.context.borrow().get_camera().borrow().resolution;
-            let (w, h_px) = (res.x as f32, res.y as f32);
-            if let Some(menu) = &mut self.menu {
-                menu.render_touch_buttons(w, h_px);
-            }
-        }
     }
 
     fn finish_pass(&mut self) {

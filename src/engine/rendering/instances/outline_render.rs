@@ -77,12 +77,6 @@ impl IRenderer for OutlineRenderer {
         let scene    = match context.scene() { Some(s) => s, None => return };
         let nodes    = scene.collect_nodes_of_type::<SimpleEntity>();
         if nodes.is_empty() {
-            unsafe {
-                gl::EnableVertexAttribArray(1);
-                gl::CullFace(gl::BACK);
-                gl::DepthMask(gl::TRUE);
-                gl::Disable(gl::BLEND);
-            }
             self.shader.unbind();
             return;
         }
@@ -96,9 +90,8 @@ impl IRenderer for OutlineRenderer {
             gl::CullFace(gl::FRONT);
             gl::Enable(gl::BLEND);
             gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
-            // Outline shader only uses attrib locations 0 (pos) and 2 (norm).
-            // Disable location 1 (uv) so strict GLES drivers don't reject the draw.
-            gl::DisableVertexAttribArray(1);
+            // Note: DisableVertexAttribArray(1) must happen AFTER each VAO bind
+            // because the VAO restores its own attrib enable state on bind.
         }
 
         self.shader.bind();
@@ -140,7 +133,12 @@ impl IRenderer for OutlineRenderer {
                     render_state = RenderState::new(self, entity, &camera_ref, i);
                     self.shader.update_per_instance_uniforms(&render_state);
                     model_ref.bind_and_configure(i);
+                    // VAO bind restores its stored attrib states — disable uv (loc 1)
+                    // after bind so strict GLES drivers don't reject the draw call.
+                    unsafe { gl::DisableVertexAttribArray(1); }
                     model_ref.render(&render_state, i);
+                    // Re-enable before unbind so the VAO stores the correct state
+                    unsafe { gl::EnableVertexAttribArray(1); }
                     model_ref.unbind(i);
                 }
             }
@@ -149,7 +147,6 @@ impl IRenderer for OutlineRenderer {
         self.shader.unbind();
 
         unsafe {
-            gl::EnableVertexAttribArray(1);  // restore uv attrib
             gl::CullFace(gl::BACK);
             gl::DepthMask(gl::TRUE);
             gl::Disable(gl::BLEND);

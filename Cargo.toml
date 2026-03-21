@@ -72,6 +72,9 @@ keystore_password = "danjklk98234o23penmp09kasdpldas%&()Q"
 key_alias = "formosaic"
 key_password = "danjklk98234o23penmp09kasdpldas%&()Q"
 
+[patch.crates-io]
+imgui-winit-support = { path = "vendor/imgui-winit-support" }
+
 [build-dependencies]
 gl_generator = "0.14"
 cfg_aliases = "0.2.1"

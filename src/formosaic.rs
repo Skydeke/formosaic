@@ -46,7 +46,6 @@ use crate::{
         },
         rendering::instances::{
             camera::orbit_controller::OrbitController,
-            menu_render::MenuPanel,
         },
     },
     input::{Event, Key},
@@ -115,6 +114,7 @@ pub struct Formosaic {
     registry:         LevelRegistry,
     client:           PolyPizzaClient,
     mode:             AppMode,
+    solved_timer:     f32,   // seconds since solve; transitions to menu after 5s
 }
 
 impl Formosaic {
@@ -136,6 +136,7 @@ impl Formosaic {
             registry,
             client: PolyPizzaClient::new(),
             mode: AppMode::LevelSelect,
+            solved_timer: 0.0,
         }
     }
 
@@ -201,6 +202,7 @@ impl Formosaic {
         self.level_start  = Some(Instant::now());
         self.elapsed_secs = 0.0;
         self.mode         = AppMode::InGame { level_id: level_id.to_string() };
+        self.solved_timer = 0.0;
     }
 
     fn load_builtin_cactus(&mut self, ctx: &mut SceneContext) {
@@ -300,6 +302,7 @@ impl Formosaic {
             camera.borrow_mut().set_controller(Some(Box::new(post)));
         }
         self.game_state = GameState::Solved;
+        self.solved_timer = 0.0;
 
         let level_id = match &self.mode {
             AppMode::InGame { level_id } => level_id.clone(),
@@ -396,14 +399,6 @@ impl Formosaic {
         matches!(self.mode, AppMode::LevelSelect)
     }
 
-    /// Which menu panel is currently active.
-    pub fn menu_panel(&self) -> MenuPanel {
-        match &self.mode {
-            AppMode::Downloading { .. } => MenuPanel::Online,
-            _                           => MenuPanel::Levels,
-        }
-    }
-
     /// Index of the currently highlighted level in the menu grid.
     pub fn selected_level_idx(&self) -> usize { 0 }
 
@@ -471,7 +466,12 @@ impl Application for Formosaic {
                 cam_pos    = Some(*cam_start + (*cam_end - *cam_start) * t);
                 cam_target = self.orbit.as_ref().map(|o| o.target);
             }
-            GameState::Solved => {}
+            GameState::Solved => {
+                self.solved_timer += delta_time;
+                if self.solved_timer >= 5.0 {
+                    self.mode = AppMode::LevelSelect;
+                }
+            }
         }
 
         if let (Some(pos), Some(tgt)) = (cam_pos, cam_target) {

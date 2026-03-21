@@ -86,8 +86,6 @@ impl LightingPass {
             );
         }
 
-        // Dispatch compute shader with proper work group sizing
-        // Typically you want work groups of 8x8 or 16x16
         let group_size = 32;
         let groups_x = (scene_fbo.get_width() + group_size - 1) / group_size;
         let groups_y = (scene_fbo.get_height() + group_size - 1) / group_size;
@@ -105,11 +103,25 @@ impl LightingPass {
             }
         }
 
-        // Memory barrier to ensure compute shader writes are visible
-        self.program
-            .memory_barrier(gl::SHADER_IMAGE_ACCESS_BARRIER_BIT);
+        // Memory barrier so compute writes are visible to subsequent reads.
+        self.program.memory_barrier(gl::SHADER_IMAGE_ACCESS_BARRIER_BIT);
 
         self.program.unbind();
+
+        // ── Unbind image units immediately after dispatch ─────────────────
+        // Image unit bindings persist across draw calls on GLES.  On Adreno
+        // the driver validates *all* active image units against *all* active
+        // texture sampler units at every draw call — even when the draw call
+        // doesn't use compute at all.  If a texture is simultaneously bound
+        // as an image (read/write) AND as a sampler (e.g. entity albedo on
+        // TEXTURE0 == image unit 0), the driver raises GL_INVALID_OPERATION.
+        // We clear all four units here, right after dispatch, so rasterisation
+        // passes run with a clean image-unit table.
+        unsafe {
+            for unit in 0u32..4 {
+                gl::BindImageTexture(unit, 0, 0, gl::FALSE, 0, gl::READ_ONLY, gl::RGBA8);
+            }
+        }
     }
 }
 

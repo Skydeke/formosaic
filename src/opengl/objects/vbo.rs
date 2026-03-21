@@ -155,4 +155,33 @@ impl Vbo {
             self.deleted = true;
         }
     }
+
+    /// Upload raw bytes from any slice, re-allocating if needed.
+    /// Useful for packed structs (e.g. imgui DrawVert) that aren't plain floats/ints.
+    pub fn store_raw<T>(&mut self, data: &[T]) {
+        let byte_len = data.len() * std::mem::size_of::<T>();
+        if byte_len > self.size {
+            // Re-allocate
+            self.bind();
+            unsafe {
+                gl::BufferData(
+                    self.target.value(),
+                    byte_len as isize,
+                    data.as_ptr() as *const _,
+                    self.usage.value(),
+                );
+            }
+            self.size = byte_len;
+        } else {
+            self.bind();
+            unsafe {
+                gl::BufferSubData(
+                    self.target.value(),
+                    0,
+                    byte_len as isize,
+                    data.as_ptr() as *const _,
+                );
+            }
+        }
+    }
 }
