@@ -9,7 +9,6 @@ pub struct ShaderProgram<T: Processable> {
     id: u32,
     per_render_uniforms: Vec<Rc<RefCell<dyn for<'a> Uniform<RenderState<'a, T>>>>>,
     per_instance_uniforms: Vec<Rc<RefCell<dyn for<'a> Uniform<RenderState<'a, T>>>>>,
-    bound_program: Option<u32>,
 }
 
 impl<T: Processable> ShaderProgram<T> {
@@ -50,7 +49,6 @@ impl<T: Processable> ShaderProgram<T> {
                 id,
                 per_render_uniforms: Vec::new(),
                 per_instance_uniforms: Vec::new(),
-                bound_program: None,
             })
         }
     }
@@ -65,17 +63,11 @@ impl<T: Processable> ShaderProgram<T> {
     }
 
     pub fn bind(&mut self) {
-        if self.bound_program != Some(self.id) {
-            unsafe { gl::UseProgram(self.id) };
-            self.bound_program = Some(self.id);
-        }
+        unsafe { gl::UseProgram(self.id) };
     }
 
     pub fn unbind(&mut self) {
-        if self.bound_program != Some(0) {
-            unsafe { gl::UseProgram(0) };
-            self.bound_program = Some(0);
-        }
+        unsafe { gl::UseProgram(0) };
     }
 
     pub fn add_per_render_uniform(

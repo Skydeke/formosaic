@@ -60,7 +60,7 @@ impl LightingPass {
                 gl::FALSE,       // layered
                 0,               // layer
                 gl::READ_ONLY,
-                gl::RGBA32F, // format
+                gl::RGBA16F, // format
             );
 
             let pos_texture_id = deferred_fbo.get_attachments()[2].get_texture().get_id();
@@ -71,7 +71,7 @@ impl LightingPass {
                 gl::FALSE,      // layered
                 0,              // layer
                 gl::READ_ONLY,
-                gl::RGBA32F, // format
+                gl::RGBA16F, // format
             );
 
             let scene_texture_id = scene_fbo.get_attachments()[0].get_texture().get_id();
@@ -90,6 +90,11 @@ impl LightingPass {
         let groups_x = (scene_fbo.get_width() + group_size - 1) / group_size;
         let groups_y = (scene_fbo.get_height() + group_size - 1) / group_size;
         self.program.update_uniforms(&render_state);
+
+        // Drain any stale errors before dispatch so the post-dispatch check
+        // only catches errors from this call.
+        unsafe { while gl::GetError() != gl::NO_ERROR {} }
+
         self.program.dispatch(
             groups_x.try_into().unwrap(),
             groups_y.try_into().unwrap(),

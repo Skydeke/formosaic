@@ -8,7 +8,7 @@ use crate::{
                 hint_render::HintRenderer,
                 imgui_render::ImguiGlRenderer,
                 menu_render::MenuRenderer,
-                outline_render::OutlineRenderer,
+                shine_render::ShineRenderer,
             },
         },
     },
@@ -51,6 +51,10 @@ pub struct FrameData {
     pub show_menu:       bool,
     /// Whether the platform is touch-only (Android).
     pub is_touch:        bool,
+    /// GL texture ID of the world-space position G-buffer attachment.
+    /// Used by screen-space overlay renderers (e.g. ShineRenderer).
+    /// 0 = not available.
+    pub position_tex_id: u32,
     /// Imgui draw data pointer — null when imgui has nothing to draw.
     /// Valid until the next `imgui::Context::render()` call.
     pub imgui_draw_data: *const imgui::DrawData,
@@ -70,6 +74,7 @@ impl Default for FrameData {
             viewport_h:      1.0,
             show_menu:       false,
             is_touch:        false,
+            position_tex_id: 0,
             imgui_draw_data: std::ptr::null(),
         }
     }
@@ -109,14 +114,15 @@ impl Pipeline {
             Err(e) => log::warn!("MenuRenderer failed to initialise: {e}"),
         }
 
-        match OutlineRenderer::new() {
-            Ok(r)  => pipeline.add_renderer(Box::new(r)),
-            Err(e) => log::warn!("OutlineRenderer failed to initialise: {e}"),
-        }
 
         match HintRenderer::new() {
             Ok(r)  => pipeline.add_renderer(Box::new(r)),
             Err(e) => log::warn!("HintRenderer failed to initialise: {e}"),
+        }
+
+        match ShineRenderer::new() {
+            Ok(r)  => pipeline.add_renderer(Box::new(r)),
+            Err(e) => log::warn!("ShineRenderer failed to initialise: {e}"),
         }
 
         pipeline
@@ -145,8 +151,36 @@ impl Pipeline {
             self.deferred_fbo.resize(width as i32, height as i32);
         }
 
+        // Inject the G-buffer position texture ID so overlay renderers can sample it.
+        let pos_tex_id = self.deferred_fbo
+            .get_attachments()
+            .get(2)
+            .map(|a| a.get_texture().get_id())
+            .unwrap_or(0);
+
         // Broadcast per-frame data to every renderer before any rendering begins.
-        for r in &mut self.renderers { r.prepare(frame); }
+        // We temporarily patch position_tex_id into the caller's frame data.
+        let mut frame_owned = FrameData {
+            warmth:          frame.warmth,
+            warmth_color:    frame.warmth_color,
+            hint_tier:       frame.hint_tier,
+            solved:          frame.solved,
+            glow_intensity:  frame.glow_intensity,
+            time:            frame.time,
+            delta_time:      frame.delta_time,
+            viewport_w:      frame.viewport_w,
+            viewport_h:      frame.viewport_h,
+            show_menu:       frame.show_menu,
+            is_touch:        frame.is_touch,
+            position_tex_id: pos_tex_id,
+            imgui_draw_data: frame.imgui_draw_data,
+        };
+        for r in &mut self.renderers { r.prepare(&frame_owned); }
+        let _ = &mut frame_owned; // suppress unused warning
+
+        // Drain any stale GL errors before the frame begins so the post-draw
+        // error check in game_engine only catches errors from this frame.
+        unsafe { while gl::GetError() != gl::NO_ERROR {} }
 
         self.geometry_pass();
         self.lighting_pass();
@@ -212,12 +246,12 @@ impl Pipeline {
         albedo.min_filter = Some(MinFilterParameter::Nearest);
         fbo.add_attachment(TextureAttachment::of_colour(0, albedo));
 
-        let mut normal = TextureConfigs::new(FormatType::Rgba32F, FormatType::Rgba, DataType::Float);
+        let mut normal = TextureConfigs::new(FormatType::Rgba16F, FormatType::Rgba, DataType::Float);
         normal.mag_filter = Some(MagFilterParameter::Linear);
         normal.min_filter = Some(MinFilterParameter::Linear);
         fbo.add_attachment(TextureAttachment::of_colour(1, normal));
 
-        let mut pos = TextureConfigs::new(FormatType::Rgba32F, FormatType::Rgba, DataType::Float);
+        let mut pos = TextureConfigs::new(FormatType::Rgba16F, FormatType::Rgba, DataType::Float);
         pos.mag_filter = Some(MagFilterParameter::Linear);
         pos.min_filter = Some(MinFilterParameter::Linear);
         fbo.add_attachment(TextureAttachment::of_colour(2, pos));

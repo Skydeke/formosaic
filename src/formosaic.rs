@@ -385,6 +385,7 @@ impl Formosaic {
     // ── Public accessors (read by game_engine / pipeline) ──────────────
 
     pub fn elapsed_secs(&self)           -> f32                    { self.elapsed_secs }
+    pub fn solved_timer(&self)           -> f32                    { self.solved_timer }
     pub fn entropy_report(&self)         -> Option<&EntropyReport> { self.entropy_report.as_ref() }
     pub fn is_solved(&self)              -> bool                   { self.game_state == GameState::Solved }
     pub fn is_downloading(&self)         -> bool                   { matches!(self.mode, AppMode::Downloading { .. }) || self.client.is_download_pending() }
@@ -509,7 +510,7 @@ impl Application for Formosaic {
                 self.mode = AppMode::LevelSelect;
             }
             _ => {
-                if let GameState::Playing = self.game_state {
+                if matches!(self.game_state, GameState::Playing | GameState::Solved) {
                     if let Some(camera) = ctx.camera() {
                         let (w, h) = {
                             let c = camera.borrow();

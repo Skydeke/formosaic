@@ -143,8 +143,13 @@ impl ApplicationHandler for GameEngine {
                     );
 
                     // ── Build hint frame data ─────────────────────────────
-                    let glow = if game.is_solved() {
-                        (game.elapsed_secs() * 0.5).min(1.0)
+                    // glow_intensity is based on solved_timer (0→5s), not
+                    // elapsed_secs, so it always starts at 0 right after solve.
+                    // Zero it in the menu so the outline doesn't persist there.
+                    let solved       = game.is_solved() && !game.is_in_menu();
+                    let solved_t     = game.solved_timer();
+                    let glow = if solved {
+                        (solved_t * 2.0).min(1.0)   // ramps to full in 0.5 s
                     } else { 0.0 };
 
                     let show_menu = game.is_in_menu();
@@ -155,16 +160,16 @@ impl ApplicationHandler for GameEngine {
                             warmth:         o.warmth,
                             warmth_color:   o.warmth_color,
                             hint_tier:      o.tier.as_u8(),
-                            solved:         game.is_solved(),
+                            solved,
                             glow_intensity: glow,
-                            time:           game.elapsed_secs(),
+                            time:           solved_t,
                             ..Default::default()
                         }
                     } else {
                         HintFrameData {
-                            solved:         game.is_solved(),
+                            solved,
                             glow_intensity: glow,
-                            time:           game.elapsed_secs(),
+                            time:           solved_t,
                             ..Default::default()
                         }
                     };
