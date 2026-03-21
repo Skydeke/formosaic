@@ -11,6 +11,7 @@ pub enum ShaderType {
 
 pub struct Shader {
     id: u32,
+    #[allow(dead_code)]  // retained for debug/introspection
     shader_type: ShaderType,
 }
 

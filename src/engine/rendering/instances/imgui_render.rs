@@ -48,8 +48,11 @@ pub struct ImguiGlRenderer {
     loc_proj:  i32,
     loc_tex:   i32,
     vao:       Vao,
-    vbo:       Vbo,          // vertex buffer (streaming)
-    ebo:       Vbo,          // element/index buffer (streaming)
+    vbo:       Vbo,
+    ebo:       Vbo,
+    /// Font texture — must stay alive for the lifetime of the renderer so the
+    /// GL texture object is not deleted while imgui still references its ID.
+    #[allow(dead_code)]
     font_tex:  SimpleTexture,
 }
 

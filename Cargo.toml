@@ -49,10 +49,12 @@ package = "com.formosaic.game"
 apk_name = "Formosaic"
 label = "Formosaic"
 icon = "@mipmap/ic_launcher"
-fullscreen = false
 orientation = "sensorLandscape"
 resources = "assets/res"
 assets = "assets/3d"
+
+[package.metadata.android.application]
+theme = "@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
 
 [package.metadata.android.sdk]
 target_sdk_version = 33

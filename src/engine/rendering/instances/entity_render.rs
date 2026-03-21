@@ -76,34 +76,29 @@ impl<T: SceneObject + 'static> IRenderer for EntityRenderer<T> {
     fn render(&mut self, context: &SceneContext) {
         let camera = context.get_camera();
 
-        // Get entities from the scenegraph
         if let Some(scene) = context.scene() {
             let entity_nodes = scene.collect_nodes_of_type::<T>();
 
+            // Low-poly models often have no consistent winding — disable culling.
+            unsafe { gl::Disable(gl::CULL_FACE); }
+
             for node in &entity_nodes {
-                // Downcast to the specific entity type
                 let node_ref = node.borrow();
                 if let Some(entity) = node_ref.as_any().downcast_ref::<T>() {
-                    // Extract camera borrow to live longer
                     let camera_ref = camera.borrow();
 
-                    // Bind shader before creating RenderState
                     self.shader_program.bind();
 
-                    // Create RenderState with the longer-lived camera reference
                     let mut render_state = RenderState::new(self, entity, &camera_ref, 0);
-                    self.shader_program
-                        .update_per_instance_uniforms(&render_state);
+                    self.shader_program.update_per_instance_uniforms(&render_state);
 
-                    // Extract model to live longer
                     let model = entity.model();
                     let mesh_count = model.borrow().get_meshes().len();
                     let mut model_ref = model.borrow_mut();
 
                     for i in 0..mesh_count {
                         render_state = RenderState::new(self, entity, &camera_ref, i);
-                        self.shader_program
-                            .update_per_instance_uniforms(&render_state);
+                        self.shader_program.update_per_instance_uniforms(&render_state);
                         model_ref.bind_and_configure(i);
                         model_ref.render(&render_state, i);
                         model_ref.unbind(i);
@@ -112,6 +107,9 @@ impl<T: SceneObject + 'static> IRenderer for EntityRenderer<T> {
                     self.shader_program.unbind();
                 }
             }
+
+            // Restore culling for subsequent renderers (outline, disc, etc.)
+            unsafe { gl::Enable(gl::CULL_FACE); }
         }
     }
 

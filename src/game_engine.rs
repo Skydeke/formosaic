@@ -194,7 +194,7 @@ impl ApplicationHandler for GameEngine {
                     // All interactive UI is rendered by imgui on top.
                     if let Some(mr) = &mut self.menu_renderer {
                         if show_menu {
-                            mr.update(hint.time, pw, ph);
+                            mr.update(delta_time, pw, ph);
                             mr.render_background(pw, ph);
                         } else if is_touch {
                             mr.render_touch_buttons(pw, ph);
@@ -417,10 +417,7 @@ impl GameEngine {
     }
 
     // ── Dear ImGui UI ─────────────────────────────────────────────────────
-    // imgui draws only the interactive widget layer.
-    // The decorative background (wire mesh, level cards) comes from MenuRenderer
-    // which runs before imgui each frame.
-    // NOTE: w/h here are LOGICAL pixels (already divided by scale_factor).
+
     fn build_ui(
         ui: &imgui::Ui,
         game: &mut Formosaic,
@@ -429,6 +426,27 @@ impl GameEngine {
         show_menu: bool,
         is_touch: bool,
     ) {
+        // Local helpers
+        fn diff_color(d: f32) -> [f32; 4] {
+            match d {
+                v if v < 0.25 => [0.18, 0.75, 0.50, 1.0],
+                v if v < 0.50 => [0.75, 0.63, 0.18, 1.0],
+                v if v < 0.75 => [0.75, 0.19, 0.29, 1.0],
+                _             => [0.63, 0.18, 0.75, 1.0],
+            }
+        }
+        fn diff_label(d: f32) -> &'static str {
+            match d {
+                v if v < 0.25 => "Easy",
+                v if v < 0.50 => "Medium",
+                v if v < 0.75 => "Hard",
+                _             => "Expert",
+            }
+        }
+        fn truncate(s: &str, max: usize) -> String {
+            if s.len() > max { format!("{}..", &s[..max]) } else { s.to_string() }
+        }
+
         use imgui::*;
 
         // ── In-game HUD (top-right, no background) ────────────────────────
@@ -462,16 +480,18 @@ impl GameEngine {
                 }
             });
 
-        // ── Hint warmth indicator (bottom-left) ───────────────────────────
-        if game.hint_system().hint_count() > 0
-            || game.last_hint_output().map(|o| o.warmth > 0.6).unwrap_or(false)
-        {
+        // ── Hint warmth indicator — only shown when tier >= WarmCold ─────
+        // Placed top-left so it doesn't overlap the Android touch buttons
+        // at the bottom of the screen.
+        use crate::puzzle::hints::HintTier;
+        let hint_tier = game.hint_system().tier();
+        if hint_tier != HintTier::None {
             ui.window("##hints")
                 .flags(hud_flags)
-                .position([10.0, h - 80.0], Condition::Always)
-                .size([200.0, 70.0], Condition::Always)
+                .position([10.0, 10.0], Condition::Always)
+                .size([180.0, 60.0], Condition::Always)
                 .build(|| {
-                    let warmth = game.last_hint_output().map(|o| o.warmth).unwrap_or(0.0);
+                    let warmth = game.last_hint_output().map(|o| o.warmth).unwrap_or(0.5);
                     let cold   = [0.2_f32, 0.4, 0.9, 1.0];
                     let hot    = [0.9_f32, 0.2, 0.1, 1.0];
                     let col    = [
@@ -484,140 +504,198 @@ impl GameEngine {
                     ui.text_colored(col, format!(">> {} <<", label));
                     ui.text_colored(
                         [0.5, 0.5, 0.5, 0.7],
-                        format!("Hint: {:?}", game.hint_system().tier()),
+                        format!("Hint: {:?}", hint_tier),
                     );
                 });
         }
 
         if !show_menu { return; }
 
-        // ── Menu overlay — imgui draws ALL interactive UI ──────────────────
-        // MenuRenderer already drew the dark backdrop + wire mesh.
-        // This window is full-screen and transparent so the background shows.
+        // ── Full-screen transparent menu overlay ───────────────────────────
+        // MenuRenderer drew the dark backdrop + wire mesh behind this.
         let menu_flags = WindowFlags::NO_DECORATION
             | WindowFlags::NO_MOVE
             | WindowFlags::NO_SAVED_SETTINGS
             | WindowFlags::NO_BACKGROUND
             | WindowFlags::NO_SCROLL_WITH_MOUSE;
 
-        // Scale button sizes for touch on Android — desktop uses compact sizes.
-        let btn_size = if is_touch {
-            [(w * 0.35).max(160.0), (h * 0.07).max(44.0)]
-        } else {
-            [150.0_f32, 32.0]
-        };
+        let pad = (w * 0.025).max(8.0);
 
-        // Card height scales with available space on Android
-        let card_h = if is_touch { (h * 0.18).max(80.0) } else { 90.0_f32 };
-
-        // Use full screen — sidebar layout matches MenuRenderer's proportions
-        let sidebar_w = (w * 0.28).max(160.0);
+        // Collect levels before the window closure to avoid borrow issues
+        let levels: Vec<_> = game.saved_levels().to_vec();
 
         ui.window("##menu")
             .flags(menu_flags)
             .position([0.0, 0.0], Condition::Always)
             .size([w, h], Condition::Always)
             .build(|| {
-                // ── Title ─────────────────────────────────────────────────
-                ui.set_cursor_pos([w * 0.025, h * 0.03]);
-                ui.text_colored([0.8, 0.85, 0.95, 1.0], "FORMOSAIC");
-                ui.same_line();
-                ui.text_colored([0.35, 0.38, 0.50, 0.8], "  puzzle  v0.1");
+                if is_touch {
+                    // ── Android: full-width vertical stacked layout ────────
+                    // Title row
+                    ui.set_cursor_pos([pad, pad]);
+                    ui.text_colored([0.8, 0.85, 0.95, 1.0], "FORMOSAIC");
+                    ui.same_line();
+                    ui.text_colored([0.35, 0.38, 0.50, 0.8], " v0.1");
 
-                // ── Sidebar buttons ───────────────────────────────────────
-                ui.set_cursor_pos([w * 0.025, h * 0.42]);
-                if ui.button_with_size("[N] Fetch Online", btn_size) {
-                    game.on_event(&EngineEvent::KeyDown { key: EngineKey::N }, ctx);
-                }
-                ui.set_cursor_pos([w * 0.025, h * 0.42 + btn_size[1] + 8.0]);
-                if ui.button_with_size("[R] Random Saved", btn_size) {
-                    game.on_event(&EngineEvent::KeyDown { key: EngineKey::R }, ctx);
-                }
-                if game.is_downloading() {
-                    ui.set_cursor_pos([w * 0.025, h * 0.42 + (btn_size[1] + 8.0) * 2.0]);
-                    ui.text_colored([0.4, 0.7, 1.0, 1.0], "Fetching...");
-                }
+                    // Action buttons — full width, touch-friendly height
+                    let btn_w = w - pad * 2.0;
+                    let btn_h = (h * 0.09).max(44.0);
+                    let gap   = pad * 0.5;
 
-                // ── Level cards (content panel) ───────────────────────────
-                let content_x = sidebar_w + w * 0.025;
-                let content_w = w - content_x - w * 0.025;
-                let content_y = h * 0.08;
+                    ui.set_cursor_pos([pad, h * 0.12]);
+                    if ui.button_with_size("[N] Fetch Online", [btn_w, btn_h]) {
+                        game.on_event(&EngineEvent::KeyDown { key: EngineKey::N }, ctx);
+                    }
+                    ui.set_cursor_pos([pad, h * 0.12 + btn_h + gap]);
+                    if ui.button_with_size("[R] Random Saved", [btn_w, btn_h]) {
+                        game.on_event(&EngineEvent::KeyDown { key: EngineKey::R }, ctx);
+                    }
+                    if game.is_downloading() {
+                        ui.set_cursor_pos([pad, h * 0.12 + (btn_h + gap) * 2.0]);
+                        ui.text_colored([0.4, 0.7, 1.0, 1.0], "Fetching...");
+                    }
 
-                // Collect outside the child window to avoid double-borrow
-                let levels: Vec<_> = game.saved_levels().to_vec();
+                    // Level cards below — 2 columns, scrollable
+                    let list_y  = h * 0.12 + (btn_h + gap) * 2.0 + pad;
+                    let list_h  = h - list_y - pad;
+                    let card_h  = (h * 0.20).max(80.0);
+                    let card_w  = (w - pad * 3.0) * 0.5;
 
-                ui.set_cursor_pos([content_x, content_y]);
-                ui.child_window("##levels")
-                    .size([content_w, h - content_y - h * 0.06])
-                    .border(false)
-                    .build(|| {
-                        if levels.is_empty() {
-                            ui.spacing(); ui.spacing();
-                            ui.text_colored([0.35, 0.38, 0.50, 1.0], "No saved levels yet.");
-                            ui.spacing();
-                            ui.text_colored([0.35, 0.38, 0.50, 0.8],
-                                "Press [N] to fetch a random model from Poly Pizza.");
-                        } else {
-                            let cols   = if is_touch { 2usize } else { 3usize };
-                            let avail  = ui.content_region_avail()[0];
-                            let cw     = ((avail - 8.0 * cols as f32) / cols as f32).max(80.0);
-                            let mut col = 0usize;
+                    ui.set_cursor_pos([pad, list_y]);
+                    ui.child_window("##levels")
+                        .size([w - pad * 2.0, list_h])
+                        .border(false)
+                        .build(|| {
+                            if levels.is_empty() {
+                                ui.spacing();
+                                ui.text_colored([0.35, 0.38, 0.50, 1.0],
+                                    "No saved levels yet.");
+                                ui.text_colored([0.35, 0.38, 0.50, 0.8],
+                                    "Use [N] to fetch from Poly Pizza.");
+                            } else {
+                                let mut col = 0usize;
+                                for level in &levels {
+                                    let diff_col = diff_color(level.difficulty);
+                                    let diff_str = diff_label(level.difficulty);
 
-                            for level in &levels {
-                                let diff_col = match level.difficulty {
-                                    d if d < 0.25 => [0.18, 0.75, 0.50, 1.0_f32],
-                                    d if d < 0.50 => [0.75, 0.63, 0.18, 1.0],
-                                    d if d < 0.75 => [0.75, 0.19, 0.29, 1.0],
-                                    _             => [0.63, 0.18, 0.75, 1.0],
-                                };
-                                let diff_str = match level.difficulty {
-                                    d if d < 0.25 => "Easy",
-                                    d if d < 0.50 => "Medium",
-                                    d if d < 0.75 => "Hard",
-                                    _             => "Expert",
-                                };
-
-                                ui.child_window(format!("##card_{}", level.id))
-                                    .size([cw, card_h])
-                                    .border(true)
-                                    .build(|| {
-                                        let name = if level.name.len() > 14 {
-                                            format!("{:.14}..", level.name)
-                                        } else { level.name.clone() };
-                                        ui.text_colored([0.82, 0.85, 0.94, 1.0], name);
-
-                                        let author = if level.author.len() > 16 {
-                                            format!("{:.16}..", level.author)
-                                        } else { level.author.clone() };
-                                        ui.text_colored([0.35, 0.38, 0.50, 0.8], author);
-
-                                        ui.text_colored(diff_col, diff_str);
-                                        if let Some(t) = level.best_time_secs {
-                                            ui.same_line();
-                                            ui.text_colored([0.35, 0.38, 0.50, 0.7],
-                                                format!("  {:.1}s", t));
-                                        }
-
-                                        let play_h = (card_h * 0.28).max(22.0);
-                                        if ui.button_with_size("Play", [cw - 12.0, play_h]) {
-                                            // Load this level
-                                            game.on_event(
-                                                &EngineEvent::KeyDown { key: EngineKey::L },
-                                                ctx,
-                                            );
-                                        }
-                                    });
-
-                                col += 1;
-                                if col < cols { ui.same_line(); } else { col = 0; }
+                                    ui.child_window(format!("##c_{}", level.id))
+                                        .size([card_w, card_h])
+                                        .border(true)
+                                        .build(|| {
+                                            // Truncate to fit narrow cards
+                                            let name = truncate(&level.name, 12);
+                                            ui.text_colored([0.82, 0.85, 0.94, 1.0], name);
+                                            let author = truncate(&level.author, 14);
+                                            ui.text_colored([0.35, 0.38, 0.50, 0.8], author);
+                                            ui.text_colored(diff_col, diff_str);
+                                            if let Some(t) = level.best_time_secs {
+                                                ui.text_colored([0.35, 0.38, 0.50, 0.7],
+                                                    format!("{:.1}s", t));
+                                            }
+                                            let play_h = (card_h * 0.3).max(24.0);
+                                            if ui.button_with_size("Play",
+                                                [card_w - 8.0, play_h])
+                                            {
+                                                game.on_event(
+                                                    &EngineEvent::KeyDown { key: EngineKey::L },
+                                                    ctx,
+                                                );
+                                            }
+                                        });
+                                    col += 1;
+                                    if col < 2 { ui.same_line(); } else { col = 0; }
+                                }
                             }
-                        }
-                    });
+                        });
+                } else {
+                    // ── Desktop: sidebar + content columns ─────────────────
+                    let sidebar_w = (w * 0.28).max(150.0);
+                    let btn_size  = [sidebar_w - pad * 2.0, 30.0];
+                    let card_h    = 90.0_f32;
 
-                // Attribution — bottom strip
-                ui.set_cursor_pos([content_x, h - h * 0.045]);
-                ui.text_colored([0.25, 0.27, 0.36, 0.7],
-                    "Models: Poly Pizza (poly.pizza) CC-BY");
+                    // Title
+                    ui.set_cursor_pos([pad, pad]);
+                    ui.text_colored([0.8, 0.85, 0.95, 1.0], "FORMOSAIC");
+                    ui.same_line();
+                    ui.text_colored([0.35, 0.38, 0.50, 0.8], "  puzzle  v0.1");
+
+                    // Sidebar buttons
+                    ui.set_cursor_pos([pad, h * 0.42]);
+                    if ui.button_with_size("[N] Fetch Online", btn_size) {
+                        game.on_event(&EngineEvent::KeyDown { key: EngineKey::N }, ctx);
+                    }
+                    ui.set_cursor_pos([pad, h * 0.42 + 38.0]);
+                    if ui.button_with_size("[R] Random Saved", btn_size) {
+                        game.on_event(&EngineEvent::KeyDown { key: EngineKey::R }, ctx);
+                    }
+                    if game.is_downloading() {
+                        ui.set_cursor_pos([pad, h * 0.42 + 78.0]);
+                        ui.text_colored([0.4, 0.7, 1.0, 1.0], "Fetching...");
+                    }
+
+                    // Version bottom-left
+                    ui.set_cursor_pos([pad, h - 20.0]);
+                    ui.text_colored([0.25, 0.27, 0.36, 0.7], "v0.1.0");
+
+                    // Content: level cards
+                    let content_x = sidebar_w + pad;
+                    let content_w = w - content_x - pad;
+                    let content_y = h * 0.08;
+
+                    ui.set_cursor_pos([content_x, content_y]);
+                    ui.child_window("##levels")
+                        .size([content_w, h - content_y - 28.0])
+                        .border(false)
+                        .build(|| {
+                            if levels.is_empty() {
+                                ui.spacing(); ui.spacing();
+                                ui.text_colored([0.35, 0.38, 0.50, 1.0],
+                                    "No saved levels yet.");
+                                ui.spacing();
+                                ui.text_colored([0.35, 0.38, 0.50, 0.8],
+                                    "Press [N] to fetch a model from Poly Pizza.");
+                            } else {
+                                let avail = ui.content_region_avail()[0];
+                                let cols  = 3usize;
+                                let cw    = ((avail - 8.0 * cols as f32) / cols as f32).max(80.0);
+                                let mut col = 0usize;
+
+                                for level in &levels {
+                                    let diff_col = diff_color(level.difficulty);
+                                    let diff_str = diff_label(level.difficulty);
+
+                                    ui.child_window(format!("##c_{}", level.id))
+                                        .size([cw, card_h])
+                                        .border(true)
+                                        .build(|| {
+                                            let name = truncate(&level.name, 14);
+                                            ui.text_colored([0.82, 0.85, 0.94, 1.0], name);
+                                            let author = truncate(&level.author, 16);
+                                            ui.text_colored([0.35, 0.38, 0.50, 0.8], author);
+                                            ui.text_colored(diff_col, diff_str);
+                                            if let Some(t) = level.best_time_secs {
+                                                ui.same_line();
+                                                ui.text_colored([0.35, 0.38, 0.50, 0.7],
+                                                    format!("  {:.1}s", t));
+                                            }
+                                            if ui.button_with_size("Play", [cw - 12.0, 22.0]) {
+                                                game.on_event(
+                                                    &EngineEvent::KeyDown { key: EngineKey::L },
+                                                    ctx,
+                                                );
+                                            }
+                                        });
+                                    col += 1;
+                                    if col < cols { ui.same_line(); } else { col = 0; }
+                                }
+                            }
+                        });
+
+                    // Attribution
+                    ui.set_cursor_pos([content_x, h - 20.0]);
+                    ui.text_colored([0.25, 0.27, 0.36, 0.7],
+                        "Models: Poly Pizza (poly.pizza) CC-BY");
+                }
             });
     }
 
@@ -671,11 +749,14 @@ impl GameEngine {
         let mut imgui = imgui::Context::create();
         imgui.set_ini_filename(None);
 
-        // Bake font at the correct physical size for the device DPI.
-        #[cfg(target_os = "android")]
-        let font_size = 26.0_f32;
-        #[cfg(not(target_os = "android"))]
-        let font_size = 16.0_f32;
+        // Font size: bake at physical pixels for the display DPI.
+        // On Android scale_factor is typically 2.0-3.0, so we need a larger
+        // baked size.  We bake at 16 logical px × scale so text is crisp.
+        let scale       = window.scale_factor() as f32;
+        let font_size   = (16.0_f32 * scale).round().max(16.0);
+        // imgui global scale converts from baked-physical to logical display units.
+        // Setting this to 1/scale means imgui layouts in logical px.
+        let imgui_scale = 1.0 / scale;
 
         imgui.fonts().add_font(&[imgui::FontSource::DefaultFontData {
             config: Some(imgui::FontConfig {
@@ -683,6 +764,7 @@ impl GameEngine {
                 ..Default::default()
             }),
         }]);
+        imgui.io_mut().font_global_scale = imgui_scale;
 
         // Dark theme — matches MenuRenderer's colour palette
         {

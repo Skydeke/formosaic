@@ -22,6 +22,7 @@ pub struct Node {
     pub uuid: u32,
     hidden: bool,
     debug_name: Option<String>,
+    #[allow(dead_code)]  // used by set_parent; graph traversal reads children instead
     parent: Option<Weak<RefCell<dyn NodeBehavior>>>,
     children: Vec<Rc<RefCell<dyn NodeBehavior>>>,
     transform: Transform,

@@ -15,11 +15,9 @@ use crate::opengl::{
     shaders::SimpleProgram,
 };
 
-// ─── Colour palette (shared with imgui theme in game_engine) ─────────────────
-const BG:       [f32; 4] = [0.039, 0.043, 0.055, 0.97];
-const BORDER:   [f32; 4] = [0.118, 0.133, 0.208, 1.0];
-const TEXT:     [f32; 4] = [0.816, 0.847, 0.941, 1.0];
-const TEXT_DIM: [f32; 4] = [0.353, 0.376, 0.502, 1.0];
+// ─── Colour palette ───────────────────────────────────────────────────────────
+const BG:     [f32; 4] = [0.039, 0.043, 0.055, 0.97];
+const BORDER: [f32; 4] = [0.118, 0.133, 0.208, 1.0];
 
 // ─── Wire-mesh particle ───────────────────────────────────────────────────────
 struct Particle { x: f32, y: f32, vx: f32, vy: f32 }
@@ -95,7 +93,7 @@ void main() { fragColor = vCol; }
 
         let stride = (FLOATS_PER_VERT * std::mem::size_of::<f32>()) as i32;
         let mut vbo = Vbo::create(VboTarget::ArrayBuffer, VboUsage::DynamicDraw);
-        let mut vao = Vao::create(); // auto-binds
+        let vao = Vao::create(); // creates and auto-binds
 
         vbo.bind();
         vbo.allocate_float(MAX_VERTS * FLOATS_PER_VERT);
@@ -119,20 +117,25 @@ void main() { fragColor = vCol; }
     }
 
     // ── Particle simulation tick ──────────────────────────────────────────
-    pub fn update(&mut self, _time: f32, w: f32, h: f32) {
+    /// `dt` is the frame delta in seconds.  Velocities are in pixels/second
+    /// so motion is identical regardless of frame rate.
+    pub fn update(&mut self, dt: f32, w: f32, h: f32) {
+        // Target ~1 particle per 14 000 px² of screen area.
         let target = ((w * h) / 14_000.0) as usize;
         if self.particles.len() != target {
             use rand::Rng;
             let mut rng = rand::rng();
+            // Velocity in pixels/second — looks good at ~30–40 px/s.
             self.particles = (0..target).map(|_| Particle {
                 x:  rng.random_range(0.0..w),
                 y:  rng.random_range(0.0..h),
-                vx: rng.random_range(-0.18_f32..0.18),
-                vy: rng.random_range(-0.18_f32..0.18),
+                vx: rng.random_range(-40.0_f32..40.0),
+                vy: rng.random_range(-40.0_f32..40.0),
             }).collect();
         }
         for p in &mut self.particles {
-            p.x += p.vx; p.y += p.vy;
+            p.x += p.vx * dt;
+            p.y += p.vy * dt;
             if p.x < 0.0 || p.x > w { p.vx = -p.vx; p.x = p.x.clamp(0.0, w); }
             if p.y < 0.0 || p.y > h { p.vy = -p.vy; p.y = p.y.clamp(0.0, h); }
         }
@@ -240,7 +243,6 @@ void main() { fragColor = vCol; }
 
         self.begin_draw(w, h);
 
-        let ts      = (btn_h * 0.18).max(7.0);
         let buttons: &[(&str, &str)] = &[
             ("ESC", "MENU"),
             ("H",   "HINT"),

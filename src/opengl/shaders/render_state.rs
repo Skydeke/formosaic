@@ -10,6 +10,7 @@ pub struct RenderState<'a, T: Processable> {
     renderer: &'a dyn IRenderer,
     instance: Option<&'a T>,
     camera: &'a Camera,
+    #[allow(dead_code)]  // retained for future per-mesh shader logic
     instance_mesh_idx: i32,
     mesh: Option<&'a Mesh>,
 }
