@@ -181,55 +181,55 @@ fn authed_get_bytes(url: &str) -> Result<Vec<u8>, String> {
 
 // ─── API calls ────────────────────────────────────────────────────────────────
 
-/// Fetch a random page of free (CC0) animated models.
+/// Fetch a random free model from Poly Pizza.
 ///
-/// Strategy: fetch page 0 first to discover the `total` count, then pick a
-/// uniformly random valid page and fetch it.  This avoids 401s from
-/// out-of-range page numbers while still giving variety.
-/// Falls back to CC0 non-animated if the animated set is empty.
+/// The free API tier allows full pagination when using `Animated=1` as filter
+/// (gives ~218 models across ~10 pages). License-only filters return 401 beyond
+/// page 0. Strategy: paginate the animated pool for variety, and also pull
+/// CC-BY page 0 as a static top-up so non-animated models appear sometimes.
 fn fetch_explore(_offset: usize, limit: usize) -> ExploreResult {
-    let key  = api_key()?;
-    let lim  = limit.min(32);
-
-    fetch_random_page(API_BASE, &key, lim, true)
-        .or_else(|_| fetch_random_page(API_BASE, &key, lim, false))
-}
-
-fn fetch_random_page(base: &str, key: &str, lim: usize, animated: bool) -> ExploreResult {
     use rand::Rng;
 
-    let anim_param = if animated { "&Animated=1" } else { "" };
+    let key = api_key()?;
+    let lim = limit.min(20);
 
-    // ── Step 1: page 0 to learn total ────────────────────────────────────
-    let url0 = format!("{}/search?License=1{}&Limit={}&Page=0", base, anim_param, lim);
-    log::info!("[PolyPizza] GET {} (discover total)", url0);
-    let body0 = authed_get_string(&url0, key)?;
-    log::debug!("[PolyPizza] page-0 response (first 500): {:.500}", body0);
+    // ── Animated pool: paginate freely ───────────────────────────────────
+    let url0 = format!("{}/search?Animated=1&Limit={}&Page=0", API_BASE, lim);
+    log::info!("[PolyPizza] GET {} (animated discover total)", url0);
+    let body0 = authed_get_string(&url0, &key)?;
 
-    let total = json_number(&body0, "total").unwrap_or(lim as f64) as usize;
+    let total    = json_number(&body0, "total").unwrap_or(lim as f64) as usize;
     let max_page = if total > lim { (total / lim).saturating_sub(1) } else { 0 };
+    log::info!("[PolyPizza] animated total={} max_page={}", total, max_page);
 
-    log::info!("[PolyPizza] total={} max_page={}", total, max_page);
-
-    // ── Step 2: pick a random valid page ─────────────────────────────────
     let page = if max_page > 0 { rand::rng().random_range(0..=max_page) } else { 0 };
 
-    let body = if page == 0 {
-        body0  // reuse what we already fetched
+    let animated_body = if page == 0 {
+        body0
     } else {
-        let url = format!("{}/search?License=1{}&Limit={}&Page={}", base, anim_param, lim, page);
-        log::info!("[PolyPizza] GET {} (random page)", url);
-        authed_get_string(&url, key)?
+        let url = format!("{}/search?Animated=1&Limit={}&Page={}", API_BASE, lim, page);
+        log::info!("[PolyPizza] GET {} (animated page {})", url, page);
+        authed_get_string(&url, &key)?
     };
 
-    let summaries = parse_explore_v1(&body)
-        .ok_or_else(|| format!("[PolyPizza] could not parse JSON: {:.300}", body))?;
+    let mut all = parse_explore_v1(&animated_body).unwrap_or_default();
+    log::info!("[PolyPizza] animated page {}: {} models", page, all.len());
 
-    if summaries.is_empty() {
-        Err(format!("[PolyPizza] page {} returned 0 models", page))
+    // ── CC-BY page 0 top-up (static, no pagination needed) ───────────────
+    if let Ok(body) = authed_get_string(
+        &format!("{}/search?License=0&Limit={}&Page=0", API_BASE, lim), &key
+    ) {
+        if let Some(mut ccby) = parse_explore_v1(&body) {
+            log::info!("[PolyPizza] CC-BY page 0 top-up: {} models", ccby.len());
+            all.append(&mut ccby);
+        }
+    }
+
+    if all.is_empty() {
+        Err("[PolyPizza] no models returned".to_string())
     } else {
-        log::info!("[PolyPizza] parsed {} summaries from page {}", summaries.len(), page);
-        Ok(summaries)
+        log::info!("[PolyPizza] total pool: {} models to pick from", all.len());
+        Ok(all)
     }
 }
 

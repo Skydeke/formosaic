@@ -17,6 +17,8 @@ pub struct WinitPlatform {
     hidpi_mode: ActiveHiDpiMode,
     hidpi_factor: f64,
     cursor_cache: Option<CursorSettings>,
+    /// Last touch Y position for synthesizing scroll from finger drag.
+    touch_last_y: Option<f32>,
 }
 
 impl WinitPlatform {
@@ -32,6 +34,7 @@ impl WinitPlatform {
             hidpi_mode: ActiveHiDpiMode::Default,
             hidpi_factor: 1.0,
             cursor_cache: None,
+            touch_last_y: None,
         }
     }
 
@@ -153,11 +156,28 @@ impl WinitPlatform {
                 // matches imgui's coordinate space (display_size is in logical px).
                 let logical = touch.location.to_logical::<f64>(window.scale_factor());
                 let logical = self.scale_pos_from_winit(window, LogicalPosition::new(logical.x, logical.y));
-                io.add_mouse_pos_event([logical.x as f32, logical.y as f32]);
+                let ly = logical.y as f32;
+                io.add_mouse_pos_event([logical.x as f32, ly]);
                 match touch.phase {
-                    TouchPhase::Started  => io.add_mouse_button_event(imgui::MouseButton::Left, true),
-                    TouchPhase::Ended | TouchPhase::Cancelled => io.add_mouse_button_event(imgui::MouseButton::Left, false),
-                    TouchPhase::Moved    => {}
+                    TouchPhase::Started => {
+                        self.touch_last_y = Some(ly);
+                        io.add_mouse_button_event(imgui::MouseButton::Left, true);
+                    }
+                    TouchPhase::Ended | TouchPhase::Cancelled => {
+                        self.touch_last_y = None;
+                        io.add_mouse_button_event(imgui::MouseButton::Left, false);
+                    }
+                    TouchPhase::Moved => {
+                        // Synthesize vertical scroll from finger drag so imgui
+                        // child-window scrolling works without a scrollbar.
+                        if let Some(last_y) = self.touch_last_y {
+                            let delta = ly - last_y;
+                            // Scale: imgui scroll unit ≈ one text line (~16px).
+                            // Divide by 16 so a full-screen drag scrolls ~50 lines.
+                            io.add_mouse_wheel_event([0.0, delta / 16.0]);
+                        }
+                        self.touch_last_y = Some(ly);
+                    }
                 }
             }
             WindowEvent::Focused(newly_focused) => {
