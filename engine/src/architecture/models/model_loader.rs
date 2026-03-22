@@ -356,28 +356,79 @@ impl ModelLoader {
                         }
                     }
                 }
-                // Texture path — embedded GLB textures use "*<index>"
-                "$tex.file" => {
+                "$clr.emissive" => {
+                    if let russimp_ng::material::PropertyTypeInfo::FloatArray(v) = &prop.data {
+                        if v.len() >= 3 {
+                            mat.emissive_color = Vector4::new(v[0], v[1], v[2], 1.0);
+                        }
+                    }
+                }
+                "$mat.opacity" => {
+                    if let russimp_ng::material::PropertyTypeInfo::FloatArray(v) = &prop.data {
+                        if !v.is_empty() {
+                            // TODO: store opacity somewhere in Material
+                            log::debug!("[TODO] material opacity={}", v[0]);
+                        }
+                    }
+                }
+                "$mat.gltf.alphaMode" => {
+                    if let russimp_ng::material::PropertyTypeInfo::String(s) = &prop.data {
+                        // TODO: store alpha_mode in Material
+                        log::debug!("[TODO] material alpha_mode={}", s);
+                    }
+                }
+                "$mat.gltf.alphaCutoff" => {
+                    if let russimp_ng::material::PropertyTypeInfo::FloatArray(v) = &prop.data {
+                        if !v.is_empty() {
+                            // TODO: store alpha_cutoff in Material
+                            log::debug!("[TODO] material alpha_cutoff={}", v[0]);
+                        }
+                    }
+                }
+                "$tex.file" | "$tex.diffuse" => {
                     if let russimp_ng::material::PropertyTypeInfo::String(path) = &prop.data {
-                        log::info!(
-                            "[MatTex] path={:?} embedded_keys={:?}",
-                            path,
-                            embedded.keys().collect::<Vec<_>>()
-                        );
                         if let Some(rest) = path.strip_prefix('*') {
                             if let Ok(idx) = rest.parse::<usize>() {
                                 if let Some(tex) = embedded.get(&idx) {
-                                    log::info!(
-                                        "[MatTex] SETTING diffuse_texture from embedded[{}]",
-                                        idx
-                                    );
+                                    // TODO: handle multiple diffuse textures
+                                    log::debug!("[TODO] set diffuse texture idx={}", idx);
                                     mat.diffuse_texture = Some(tex.clone());
-                                } else {
-                                    log::warn!(
-                                        "[MatTex] idx={} not found in embedded map (len={})",
-                                        idx,
-                                        embedded.len()
-                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+                "$tex.normal" => {
+                    if let russimp_ng::material::PropertyTypeInfo::String(path) = &prop.data {
+                        if let Some(rest) = path.strip_prefix('*') {
+                            if let Ok(idx) = rest.parse::<usize>() {
+                                if let Some(tex) = embedded.get(&idx) {
+                                    // TODO: store normal texture in Material
+                                    log::debug!("[TODO] set normal texture idx={}", idx);
+                                }
+                            }
+                        }
+                    }
+                }
+                "$tex.specular" => {
+                    if let russimp_ng::material::PropertyTypeInfo::String(path) = &prop.data {
+                        if let Some(rest) = path.strip_prefix('*') {
+                            if let Ok(idx) = rest.parse::<usize>() {
+                                if let Some(tex) = embedded.get(&idx) {
+                                    // TODO: store specular texture in Material
+                                    log::debug!("[TODO] set specular texture idx={}", idx);
+                                }
+                            }
+                        }
+                    }
+                }
+                "$tex.emissive" => {
+                    if let russimp_ng::material::PropertyTypeInfo::String(path) = &prop.data {
+                        if let Some(rest) = path.strip_prefix('*') {
+                            if let Ok(idx) = rest.parse::<usize>() {
+                                if let Some(tex) = embedded.get(&idx) {
+                                    // TODO: store emissive texture in Material
+                                    log::debug!("[TODO] set emissive texture idx={}", idx);
                                 }
                             }
                         }
@@ -386,6 +437,7 @@ impl ModelLoader {
                 _ => {}
             }
         }
+
         mat
     }
 }
