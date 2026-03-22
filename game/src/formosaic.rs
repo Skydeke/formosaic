@@ -265,6 +265,33 @@ impl Formosaic {
         self.load_model_and_start("models/Cactus/cactus.fbx", "cactus_builtin", ctx);
     }
 
+    /// Ensure the builtin cactus level exists in the registry so it shows up
+    /// in the menu grid on first run.  Safe to call every launch — it's a no-op
+    /// if the level is already saved.
+    fn seed_builtin_levels(&mut self) {
+        let id = "cactus_builtin";
+        if self.registry.levels.iter().any(|l| l.id == id) {
+            return;
+        }
+
+        let meta = LevelMeta {
+            id: id.to_string(),
+            name: "Cactus".to_string(),
+            author: "SoyMaria".to_string(),
+            license: "CC-BY 3.0".to_string(),
+            source_url: "https://poly.pizza/m/7S5Snphkam".to_string(),
+            model_file: "cactus.fbx".to_string(),
+            best_time_secs: None,
+            play_count: 0,
+            difficulty: 0.3,
+        };
+
+        let bytes = crate::asset_loader::load_3d_asset("models/Cactus/cactus.fbx");
+        if let Err(e) = self.registry.save_level(meta, &bytes) {
+            log::warn!("[Formosaic] Failed to seed builtin cactus: {e}");
+        }
+    }
+
     fn load_random_saved(&mut self, ctx: &mut SceneContext) {
         if let Some(meta) = self.registry.random_level() {
             let path = self.registry.model_path(meta);
@@ -899,9 +926,12 @@ fn smoothstep(t: f32) -> f32 {
 impl Application for Formosaic {
     fn on_init(&mut self, ctx: &mut SceneContext) {
         log::info!("[Formosaic] on_init");
-        // load_builtin_cactus → load_model_and_start → register_ui_nodes,
-        // so no need to call register_ui_nodes again here.
-        self.load_builtin_cactus(ctx);
+        // Seed the builtin cactus into the registry so it appears in the menu
+        // grid on first run (no-op if already saved).
+        self.seed_builtin_levels();
+        // Register UI nodes and open the level-select menu.
+        self.register_ui_nodes(ctx);
+        // mode is already AppMode::LevelSelect from Self::new().
     }
 
     fn on_update(&mut self, delta_time: f32, ctx: &mut SceneContext) {
