@@ -6,3 +6,7 @@
 - After Level Complete Artist Credits with link
 - Car Model by Ignition Labs renders wrong, it has multiple textures. Atm my engine does not properly support
   that, and a lot of other rendering properties.
+- Desktop, ingame: Key info pane (ESC -> Menu, H -> Hint)
+- Android: Icon
+- Actually parse Bone and Animation Data
+- UnitTests for game + Engine (running in CIs and Locally)
