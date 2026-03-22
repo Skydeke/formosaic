@@ -41,7 +41,6 @@ impl ModelLoader {
                 PostProcess::Triangulate,
                 PostProcess::GenerateNormals,
                 PostProcess::ImproveCacheLocality,
-                PostProcess::OptimizeMeshes,
                 PostProcess::CalculateTangentSpace,
                 PostProcess::PreTransformVertices,
                 PostProcess::EmbedTextures,

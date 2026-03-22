@@ -21,11 +21,16 @@ pub struct LightConfig {
 impl Default for LightConfig {
     fn default() -> Self {
         Self {
-            clear_color: [0.02, 0.03, 0.05],
-            sun_dir:     [0.4,  0.8,  0.4],
-            sun_color:   [1.2,  1.1,  0.9],
-            sky_color:   [0.5,  0.7,  1.0],
-            ambient_min: 0.15,
+            // Near-black neutral — barely any hue so it doesn't clash
+            clear_color: [0.02, 0.02, 0.03],
+            // Sun from upper-right-front
+            sun_dir:     [0.6,  0.9,  0.5],
+            // Warm sun, pulled back — tone-map handles highlights
+            sun_color:   [0.85, 0.78, 0.62],
+            // Subtle cool sky ambient
+            sky_color:   [0.25, 0.35, 0.60],
+            // Low ambient — let shadows be shadows
+            ambient_min: 0.14,
         }
     }
 }

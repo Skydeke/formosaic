@@ -214,16 +214,17 @@ impl MenuRenderer {
     /// `bg` is the scene clear colour (from `SceneContext::lights.clear_color`)
     /// so the menu backdrop exactly matches the in-game background.
     pub fn render_background(&mut self, w: f32, h: f32, bg: [f32; 3]) {
-        let bg4 = [bg[0], bg[1], bg[2], 0.97];
         self.begin_draw(w, h);
 
-        // Backdrop — same colour as the in-game sky/clear colour.
+        // Solid backdrop — clears whatever the lighting pass left on screen.
+        let bg4 = [bg[0], bg[1], bg[2], 1.0];
         self.batch.fill_rect(0.0, 0.0, w, h, bg4);
         self.flush_tris();
 
-        // Animated wire mesh
+        // Animated wire mesh on top.
         self.build_mesh(w, h);
         self.flush_lines();
+        self.flush_tris(); // node dots
 
         self.end_draw();
     }

@@ -128,18 +128,33 @@ impl Pipeline {
     }
 
     fn geometry_pass(&mut self, clear_color: [f32; 3]) {
+        // Skip geometry entirely when the menu is showing — the last rendered
+        // model would otherwise bleed through behind the UI.
+        let show_menu = self.context.borrow().show_menu;
+
         self.deferred_fbo.bind(FboTarget::DrawFramebuffer);
-        let [r, g, b] = clear_color;
         unsafe {
             gl::ClearColor(0.0, 0.0, 0.0, 0.0);
             gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT | gl::STENCIL_BUFFER_BIT);
-            gl::ClearColor(r, g, b, 1.0);
         }
-        self.context.borrow_mut().update();
-        let ctx = self.context.borrow();
-        for r in &mut self.renderers {
-            if r.pass() == RenderPass::Geometry { r.render(&ctx); }
+
+        if !show_menu {
+            let [r, g, b] = clear_color;
+            unsafe {
+                gl::ClearColor(r, g, b, 1.0);
+                gl::Enable(gl::POLYGON_OFFSET_FILL);
+                gl::PolygonOffset(1.0, 1.0);
+            }
+            self.context.borrow_mut().update();
+            let ctx = self.context.borrow();
+            for r in &mut self.renderers {
+                if r.pass() == RenderPass::Geometry { r.render(&ctx); }
+            }
+            unsafe { gl::Disable(gl::POLYGON_OFFSET_FILL); }
+        } else {
+            self.context.borrow_mut().update();
         }
+
         self.deferred_fbo.unbind(FboTarget::DrawFramebuffer);
     }
 

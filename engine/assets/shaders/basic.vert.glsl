@@ -19,7 +19,7 @@ void main() {
 
     // Pass to fragment shader
     v_pos = modelCoord.xyz;
-    v_uv = uv; // Already correct; no need to swap x/y unless your texture is flipped
+    v_uv = uv;
 
     // Transform normal (rotation + uniform scale)
     v_normal = normalize(mat3(uModel) * norm);
