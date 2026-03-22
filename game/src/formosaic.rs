@@ -176,6 +176,16 @@ impl Formosaic {
     // ── Level loading ──────────────────────────────────────────────────────
 
     fn load_model_and_start(&mut self, path: &str, level_id: &str, ctx: &mut SceneContext) {
+        self.load_model_from_bytes(path, level_id, None, ctx);
+    }
+
+    fn load_model_from_bytes(
+        &mut self,
+        path: &str,
+        level_id: &str,
+        preloaded: Option<&[u8]>,
+        ctx: &mut SceneContext,
+    ) {
         // Clear scene then immediately re-register UiNodes — they live in the
         // scenegraph and scene.clear() would otherwise wipe them on every load.
         if let Some(scene) = ctx.scene() {
@@ -187,7 +197,17 @@ impl Formosaic {
         self.orbit = None;
         self.hints.reset();
 
-        let bytes = crate::asset_loader::load_3d_asset(path);
+        let bytes = if let Some(b) = preloaded {
+            b.to_vec()
+        } else {
+            let p = std::path::Path::new(path);
+            if p.is_absolute() {
+                std::fs::read(p)
+                    .unwrap_or_else(|e| panic!("Failed to read model '{}': {e}", p.display()))
+            } else {
+                crate::asset_loader::load_3d_asset(path)
+            }
+        };
         let model = ModelLoader::load_from_bytes_with_path(path, &bytes);
 
         // ── Entropy-based axis selection ───────────────────────────────────
@@ -443,7 +463,14 @@ impl Formosaic {
         }
 
         let path = self.registry.model_path(&meta);
-        self.load_model_and_start(path.to_string_lossy().as_ref(), &meta.id, ctx);
+        // Pass the bytes we already have in memory — avoids re-reading from disk,
+        // which would go through the JNI asset manager on Android and crash.
+        self.load_model_from_bytes(
+            path.to_string_lossy().as_ref(),
+            &meta.id,
+            Some(&dl.bytes),
+            ctx,
+        );
 
         // Persist the entropy-derived difficulty now that analysis has run.
         if let Some(report) = self.entropy_report {
@@ -730,9 +757,11 @@ impl Formosaic {
                             }
                             let list_y = h * 0.12 + (btn_h + gap) * 2.0 + pad;
                             let list_h = h - list_y - pad;
-                            let card_h = (h * 0.20).max(80.0);
+                            let card_h = (h * 0.26).max(110.0);
                             let card_w = (w - pad * 3.0) * 0.5;
                             ui.set_cursor_pos([pad, list_y]);
+                            let _tok = ui
+                                .push_style_color(imgui::StyleColor::ChildBg, [0.0, 0.0, 0.0, 0.0]);
                             ui.child_window("##levels")
                                 .size([w - pad * 2.0, list_h])
                                 .border(false)
@@ -753,6 +782,7 @@ impl Formosaic {
                                             ui.child_window(format!("##c_{}", level.id))
                                                 .size([card_w, card_h])
                                                 .border(true)
+                                                .scroll_bar(false)
                                                 .build(|| {
                                                     ui.text_colored(
                                                         [0.88, 0.90, 0.96, 1.0],
@@ -882,7 +912,7 @@ impl Formosaic {
                             ui.set_cursor_pos([content_x, h - 20.0]);
                             ui.text_colored(
                                 [0.28, 0.34, 0.46, 0.7],
-                                "Models: Poly Pizza (poly.pizza) CC-BY",
+                                "Models: Poly Pizza (poly.pizza) CC-BY  |  Cactus by SoyMaria",
                             );
                         }
 
