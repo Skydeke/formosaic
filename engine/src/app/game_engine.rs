@@ -48,8 +48,6 @@ pub struct GameEngine<A: Application> {
     last_frame_time: std::time::Instant,
     fps_accumulator: f32,
     frame_count:     u32,
-    imgui_ctx:       Option<imgui::Context>,
-    imgui_platform:  Option<imgui_winit_support::WinitPlatform>,
 }
 
 impl<A: Application + 'static> GameEngine<A> {
@@ -62,7 +60,6 @@ impl<A: Application + 'static> GameEngine<A> {
             last_cursor_pos: (0.0, 0.0),
             last_frame_time: std::time::Instant::now(),
             fps_accumulator: 0.0, frame_count: 0,
-            imgui_ctx: None, imgui_platform: None,
         }
     }
 
@@ -113,7 +110,8 @@ impl<A: Application + 'static> GameEngine<A> {
             log::info!("Running on {}", r.to_string_lossy());
         }
 
-        // imgui — app configures theme, fonts, DPI
+        // imgui — app configures theme, fonts, DPI.
+        // The renderer takes ownership of imgui+platform (no raw pointer escapes).
         let mut imgui = imgui::Context::create();
         let scale = window.scale_factor() as f32;
         if let Some(a) = &self.app { a.configure_imgui(&mut imgui, scale); }
@@ -123,7 +121,7 @@ impl<A: Application + 'static> GameEngine<A> {
             imgui.io_mut(), window, imgui_winit_support::HiDpiMode::Default,
         );
 
-        let imgui_renderer = ImguiGlRenderer::new(&mut imgui)
+        let imgui_renderer = ImguiGlRenderer::new(imgui, platform)
             .map_err(|e| format!("imgui renderer: {}", e))?;
 
         // Scene context + pipeline
@@ -143,10 +141,8 @@ impl<A: Application + 'static> GameEngine<A> {
         pipeline.add_imgui_renderer(imgui_renderer);
         self.pipeline = Some(pipeline);
 
-        self.gl_context     = Some(gl_context);
-        self.gl_surface     = Some(gl_surface);
-        self.imgui_ctx      = Some(imgui);
-        self.imgui_platform = Some(platform);
+        self.gl_context = Some(gl_context);
+        self.gl_surface = Some(gl_surface);
 
         unsafe {
             gl::Enable(gl::DEPTH_TEST);
@@ -157,11 +153,9 @@ impl<A: Application + 'static> GameEngine<A> {
     }
 
     fn cleanup_gl(&mut self) {
-        self.imgui_platform = None;
-        self.imgui_ctx      = None;
-        self.pipeline       = None;
-        self.gl_context     = None;
-        self.gl_surface     = None;
+        self.pipeline   = None;   // drops ImguiGlRenderer which owns imgui
+        self.gl_context = None;
+        self.gl_surface = None;
         ModelCache::clear();
     }
 
@@ -206,14 +200,14 @@ impl<A: Application + 'static> ApplicationHandler for GameEngine<A> {
     }
 
     fn window_event(&mut self, event_loop: &ActiveEventLoop, wid: WindowId, event: WindowEvent) {
-        // Feed to imgui first
-        if let (Some(platform), Some(ctx), Some(window)) =
-            (&mut self.imgui_platform, &mut self.imgui_ctx, &self.window)
-        {
-            let wrapped = winit::event::Event::<()>::WindowEvent {
-                window_id: wid, event: event.clone(),
-            };
-            platform.handle_event(ctx.io_mut(), window, &wrapped);
+        // Feed to imgui first (routes through the renderer which owns the context)
+        if let (Some(pipeline), Some(window)) = (&mut self.pipeline, &self.window) {
+            if let Some(imgui_r) = pipeline.imgui_renderer_mut() {
+                let wrapped = winit::event::Event::<()>::WindowEvent {
+                    window_id: wid, event: event.clone(),
+                };
+                imgui_r.handle_event(window, &wrapped);
+            }
         }
 
         match event {
@@ -256,20 +250,14 @@ impl<A: Application + 'static> ApplicationHandler for GameEngine<A> {
                         let mut sc = sc_rc.borrow_mut();
                         app.populate_scene_context(&mut sc, dt);
 
-                        sc.imgui_draw_data = if let (Some(platform), Some(imgui)) =
-                            (&mut self.imgui_platform, &mut self.imgui_ctx)
-                        {
-                            let scale = window.scale_factor() as f32;
-                            imgui.io_mut().display_size              = [pw / scale, ph / scale];
-                            imgui.io_mut().display_framebuffer_scale = [scale, scale];
-                            platform.prepare_frame(imgui.io_mut(), window)
-                                    .expect("imgui frame prep failed");
-                            let ui = imgui.frame();
-                            app.build_ui(ui, pw / scale, ph / scale, &mut sc);
-                            platform.prepare_render(ui, window);
-                            let ptr = imgui.render() as *const imgui::DrawData;
-                            if ptr.is_null() { None } else { Some(ptr) }
-                        } else { None };
+                        // Let the imgui renderer run its new-frame + UiNode collection.
+                        // It owns imgui::Context so DrawData lifetime is fully contained.
+                        let scale = window.scale_factor() as f32;
+                        if let Some(pipeline) = &mut self.pipeline {
+                            if let Some(imgui_r) = pipeline.imgui_renderer_mut() {
+                                imgui_r.prepare(window, pw, ph, scale, &mut sc);
+                            }
+                        }
                     }
 
                     self.pipeline.as_mut().unwrap().draw(size.width, size.height);
@@ -285,7 +273,7 @@ impl<A: Application + 'static> ApplicationHandler for GameEngine<A> {
 
             WindowEvent::MouseInput { state, button, .. } => {
                 if let (Some(app), Some(window)) = (&mut self.app, &self.window) {
-                    if !self.imgui_ctx.as_ref().map(|c| c.io().want_capture_mouse).unwrap_or(false) {
+                    if !self.pipeline.as_ref().and_then(|p| p.imgui_renderer()).map(|r| r.wants_mouse()).unwrap_or(false) {
                         let size = window.inner_size();
                         let sc_rc = self.scene_context.clone().expect("no scene context");
                         match (state, button) {
@@ -310,7 +298,7 @@ impl<A: Application + 'static> ApplicationHandler for GameEngine<A> {
             WindowEvent::CursorMoved { position, .. } => {
                 self.last_cursor_pos = (position.x as f32, position.y as f32);
                 if let (Some(app), Some(window)) = (&mut self.app, &self.window) {
-                    if !self.imgui_ctx.as_ref().map(|c| c.io().want_capture_mouse).unwrap_or(false) {
+                    if !self.pipeline.as_ref().and_then(|p| p.imgui_renderer()).map(|r| r.wants_mouse()).unwrap_or(false) {
                         let size  = window.inner_size();
                         let sc_rc = self.scene_context.clone().expect("no scene context");
                         app.on_event(&EngineEvent::MouseMove {
@@ -323,7 +311,7 @@ impl<A: Application + 'static> ApplicationHandler for GameEngine<A> {
 
             WindowEvent::KeyboardInput { event, .. } => {
                 if let Some(app) = &mut self.app {
-                    if !self.imgui_ctx.as_ref().map(|c| c.io().want_capture_keyboard).unwrap_or(false) {
+                    if !self.pipeline.as_ref().and_then(|p| p.imgui_renderer()).map(|r| r.wants_keyboard()).unwrap_or(false) {
                         if event.state == ElementState::Pressed {
                             let key = match event.logical_key {
                                 Key::Named(NamedKey::Escape)                => EngineKey::Escape,

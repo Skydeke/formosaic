@@ -5,3 +5,5 @@
     it should be possible to see teh entire model without any visible triangle seams. At the moment the
     triangles all seem to move together when the angle is found. That should not be necessary.
 - The ImGui UI should be defined and configurable in formosaic.rs (using scenegraph)
+- Enforce sensible solution angle (not from very top or very bottom)
+- Hint show up in main menu -> fix

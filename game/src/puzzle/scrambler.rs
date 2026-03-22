@@ -40,9 +40,11 @@ pub fn scramble(
         params.orbit_distance, params.min_disp, params.max_disp
     );
 
+    // Clamp elevation to ±55° so the solution is never nearly vertical.
+    const MAX_ELEV: f32 = 55.0 * PI / 180.0;
     let mut rng = rand::rng();
     let theta: f32 = rng.random_range(0.0..2.0 * PI);
-    let phi: f32   = rng.random_range(-PI / 2.0..PI / 2.0);
+    let phi: f32   = rng.random_range(-MAX_ELEV..MAX_ELEV);
     let solution_dir = Vector3::new(
         phi.cos() * theta.cos(),
         phi.sin(),
@@ -68,15 +70,19 @@ pub fn make_scrambled_orbit(
 ) -> (OrbitController, Vector3<f32>) {
     let mut rng = rand::rng();
 
+    // Camera start: sample from a comfortable elevation band (±70°) and at
+    // least 60° away from the solution direction so the puzzle is non-trivial.
+    const CAM_MAX_ELEV: f32 = 70.0 * PI / 180.0;
     let start_dir = loop {
         let theta: f32 = rng.random_range(0.0..2.0 * PI);
-        let phi: f32   = rng.random_range(-PI / 2.0..PI / 2.0);
+        let phi: f32   = rng.random_range(-CAM_MAX_ELEV..CAM_MAX_ELEV);
         let candidate  = Vector3::new(
             phi.cos() * theta.cos(),
             phi.sin(),
             phi.cos() * theta.sin(),
         ).normalize();
 
+        // Must be ≥60° from solution (neither pole of the solution axis).
         if candidate.dot(solution_dir).abs() < (PI / 3.0_f32).cos() {
             break candidate;
         }

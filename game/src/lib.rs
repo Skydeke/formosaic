@@ -5,7 +5,6 @@
 //! # Module structure
 //!
 //! - `formosaic`   — Formosaic game struct, implements Application
-//! - `game_engine` — re-export of engine's GameEngine
 //! - `asset_loader`— platform-specific asset I/O
 //! - `rendering`   — game-specific renderers (hint, shine, menu)
 //! - `level`       — level storage and Poly Pizza API client
@@ -14,12 +13,11 @@
 pub mod asset_loader;
 pub mod formosaic;
 pub mod rendering;
-pub mod game_engine;
 pub mod input;
 pub mod level;
 pub mod puzzle;
 
 pub use formosaic::Formosaic;
-pub use game_engine::GameEngine;
-// Application trait lives in the engine — re-export for convenience
+// Re-export engine types so examples don't need to depend on the engine crate directly.
+pub use formosaic_engine::app::game_engine::GameEngine;
 pub use formosaic_engine::app::application::Application;

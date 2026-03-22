@@ -31,10 +31,7 @@ pub struct SceneContext {
     pub is_touch:        bool,
     /// Frame delta time in seconds.
     pub delta_time:      f32,
-    /// Imgui draw data for this frame — None when there is nothing to draw.
-    /// Written by the game layer after `imgui_ctx.render()`; valid until the
-    /// next `imgui_ctx.render()` call, which always follows `pipeline.draw()`.
-    pub imgui_draw_data: Option<*const imgui::DrawData>,
+
 }
 
 impl SceneContext {
@@ -51,7 +48,6 @@ impl SceneContext {
             show_menu:       false,
             is_touch:        false,
             delta_time:      0.0,
-            imgui_draw_data: None,
         }
     }
 

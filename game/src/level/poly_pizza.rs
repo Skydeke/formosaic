@@ -1,15 +1,40 @@
 //! Poly Pizza API client using ureq.
 //!
-//! Based on the API used by <https://github.com/Chikanz/pizzabox>.
-//! Explore endpoint:  GET https://poly.pizza/api/search/explore?take=N&skip=O
-//! Model detail:      GET https://poly.pizza/api/m/{id}
+//! Uses the **official** Poly Pizza v1.1 REST API:
+//!   `https://api.poly.pizza/v1.1`
+//!
+//! Authentication: `x-auth-token: <key>` header.
+//! Authentication: `x-auth-token: <key>` header.
+//! The key is baked in at **compile time** via `build.rs` reading the
+//! `POLY_PIZZA_API_KEY` env var — works on both desktop and Android.
+//! Never commit the key; set it as a build/CI secret.
+//!
+//! Key endpoints used:
+//!   Search:       GET /search/{keyword}
+//!   Model detail: GET /model/{id}    → includes `Download` (CDN GLB URL)
 //!
 //! Network calls run on a background thread so the render loop never blocks.
 //! Results are polled each frame via `try_recv`.
 
 use std::sync::mpsc::{channel, Receiver, Sender};
 
-const API_BASE: &str = "https://poly.pizza/api";
+const API_BASE: &str = "https://api.poly.pizza/v1.1";
+
+/// Read the Poly Pizza API key from the environment.
+/// Returns an error string if the variable is unset or empty.
+/// Return the Poly Pizza API key baked in at compile time.
+///
+/// Set `POLY_PIZZA_API_KEY` **before `cargo build`** (CI secret for releases).
+/// `build.rs` forwards it via `cargo:rustc-env` so it works on desktop and
+/// Android without any runtime environment dependency.  Never commit the key.
+fn api_key() -> Result<&'static str, String> {
+    const KEY: &str = env!("POLY_PIZZA_API_KEY");
+    if KEY.is_empty() {
+        Err("No Poly Pizza API key baked in. Set POLY_PIZZA_API_KEY before              `cargo build`. Get a key at https://poly.pizza/settings/api".to_string())
+    } else {
+        Ok(KEY)
+    }
+}
 
 // ─── Public types ─────────────────────────────────────────────────────────────
 
@@ -21,6 +46,9 @@ pub struct ModelSummary {
     pub license: String,
     pub thumbnail_url: String,
     pub source_url: String,
+    /// Direct CDN download URL (from the v1.1 search response `Download` field).
+    /// If non-empty, we can skip the /model/{id} detail fetch.
+    pub download_url: String,
 }
 
 #[derive(Debug)]
@@ -91,14 +119,15 @@ impl PolyPizzaClient {
             return;
         }
         self.download_pending = true;
-        let tx = self.download_tx.clone();
-        let id = summary.id.clone();
-        let nm = summary.name.clone();
-        let au = summary.author.clone();
-        let li = summary.license.clone();
-        let su = summary.source_url.clone();
+        let tx  = self.download_tx.clone();
+        let id  = summary.id.clone();
+        let nm  = summary.name.clone();
+        let au  = summary.author.clone();
+        let li  = summary.license.clone();
+        let su  = summary.source_url.clone();
+        let dl  = summary.download_url.clone();   // pre-known CDN URL if available
         std::thread::spawn(move || {
-            let _ = tx.send(do_download(&id, &nm, &au, &li, &su));
+            let _ = tx.send(do_download(&id, &nm, &au, &li, &su, &dl));
         });
     }
 
@@ -129,15 +158,17 @@ impl Default for PolyPizzaClient {
 
 // ─── Network (ureq) ───────────────────────────────────────────────────────────
 
-fn get_string(url: &str) -> Result<String, String> {
+fn authed_get_string(url: &str, key: &str) -> Result<String, String> {
     ureq::get(url)
+        .set("x-auth-token", key)
         .call()
         .map_err(|e| format!("GET {}: {}", url, e))?
         .into_string()
         .map_err(|e| format!("read body {}: {}", url, e))
 }
 
-fn get_bytes(url: &str) -> Result<Vec<u8>, String> {
+fn authed_get_bytes(url: &str) -> Result<Vec<u8>, String> {
+    // CDN downloads (static.poly.pizza) don't need auth
     let resp = ureq::get(url)
         .call()
         .map_err(|e| format!("GET {}: {}", url, e))?;
@@ -150,152 +181,136 @@ fn get_bytes(url: &str) -> Result<Vec<u8>, String> {
 
 // ─── API calls ────────────────────────────────────────────────────────────────
 
-fn fetch_explore(offset: usize, limit: usize) -> ExploreResult {
-    let url = format!("{}/search/explore?take={}&skip={}", API_BASE, limit, offset);
-    log::info!("[PolyPizza] GET {}", url);
-    let body = get_string(&url)?;
-    log::debug!(
-        "[PolyPizza] explore response (first 1200 chars): {:.1200}",
-        body
-    );
-    parse_explore(&body)
-        .ok_or_else(|| format!("[PolyPizza] could not parse explore JSON: {:.300}", body))
+/// Fetch a random page of free (CC0) animated models.
+///
+/// Strategy: fetch page 0 first to discover the `total` count, then pick a
+/// uniformly random valid page and fetch it.  This avoids 401s from
+/// out-of-range page numbers while still giving variety.
+/// Falls back to CC0 non-animated if the animated set is empty.
+fn fetch_explore(_offset: usize, limit: usize) -> ExploreResult {
+    let key  = api_key()?;
+    let lim  = limit.min(32);
+
+    fetch_random_page(API_BASE, &key, lim, true)
+        .or_else(|_| fetch_random_page(API_BASE, &key, lim, false))
 }
 
-fn do_download(id: &str, name: &str, author: &str, license: &str, src: &str) -> DownloadResult {
-    // Poly Pizza model detail endpoints to try (undocumented API)
-    // /api/search/explore gives metadata only; detail page needed for download URL
-    let candidates = vec![
-        format!("{}/search/{}", API_BASE, id), // most likely REST pattern
-        format!("{}/search/model/{}", API_BASE, id), // alternative
-        format!("{}/search?id={}", API_BASE, id), // query param style
-        format!("https://poly.pizza/api/{}", id), // minimal path
-    ];
+fn fetch_random_page(base: &str, key: &str, lim: usize, animated: bool) -> ExploreResult {
+    use rand::Rng;
 
-    let mut body = String::new();
-    for url in &candidates {
-        log::info!("[PolyPizza] GET model info: {}", url);
-        match get_string(url) {
-            Ok(b) => {
-                log::debug!("[PolyPizza] response: {:.1200}", b);
-                // Accept if it contains asset/download info
-                if b.contains("glb")
-                    || b.contains("fbx")
-                    || b.contains("Assets")
-                    || b.contains("assets")
-                {
-                    body = b;
-                    break;
-                }
-                if body.is_empty() {
-                    body = b;
-                } // keep as fallback
-            }
-            Err(e) => log::debug!("[PolyPizza] {} -> {}", url, e),
-        }
+    let anim_param = if animated { "&Animated=1" } else { "" };
+
+    // ── Step 1: page 0 to learn total ────────────────────────────────────
+    let url0 = format!("{}/search?License=1{}&Limit={}&Page=0", base, anim_param, lim);
+    log::info!("[PolyPizza] GET {} (discover total)", url0);
+    let body0 = authed_get_string(&url0, key)?;
+    log::debug!("[PolyPizza] page-0 response (first 500): {:.500}", body0);
+
+    let total = json_number(&body0, "total").unwrap_or(lim as f64) as usize;
+    let max_page = if total > lim { (total / lim).saturating_sub(1) } else { 0 };
+
+    log::info!("[PolyPizza] total={} max_page={}", total, max_page);
+
+    // ── Step 2: pick a random valid page ─────────────────────────────────
+    let page = if max_page > 0 { rand::rng().random_range(0..=max_page) } else { 0 };
+
+    let body = if page == 0 {
+        body0  // reuse what we already fetched
+    } else {
+        let url = format!("{}/search?License=1{}&Limit={}&Page={}", base, anim_param, lim, page);
+        log::info!("[PolyPizza] GET {} (random page)", url);
+        authed_get_string(&url, key)?
+    };
+
+    let summaries = parse_explore_v1(&body)
+        .ok_or_else(|| format!("[PolyPizza] could not parse JSON: {:.300}", body))?;
+
+    if summaries.is_empty() {
+        Err(format!("[PolyPizza] page {} returned 0 models", page))
+    } else {
+        log::info!("[PolyPizza] parsed {} summaries from page {}", summaries.len(), page);
+        Ok(summaries)
     }
-    if body.is_empty() {
-        return Err(format!("[PolyPizza] no model info for '{}'", id));
-    }
+}
 
-    let (dl_url, ext) = extract_download_url(&body)
-        .ok_or_else(|| format!("[PolyPizza] no download URL for '{}': {:.300}", id, body))?;
+/// Download a model: use `known_dl_url` if non-empty (it comes from the search
+/// response `Download` field), otherwise fetch the model detail endpoint to get it.
+fn do_download(id: &str, name: &str, author: &str, license: &str, src: &str, known_dl_url: &str) -> DownloadResult {
+    // Fast path: search response already gave us the CDN URL
+    let (dl_url, ext) = if !known_dl_url.is_empty() && (known_dl_url.contains(".glb") || known_dl_url.contains(".fbx")) {
+        log::info!("[PolyPizza] Using inline download URL for '{}': {}", id, known_dl_url);
+        (known_dl_url.to_string(), url_ext(known_dl_url))
+    } else {
+        // Slow path: fetch /model/{id} to get the Download field
+        let key = api_key()?;
+        let detail_url = format!("{}/model/{}", API_BASE, id);
+        log::info!("[PolyPizza] GET model detail: {}", detail_url);
+        let body = authed_get_string(&detail_url, &key)
+            .map_err(|e| format!("[PolyPizza] model detail fetch failed for '{}': {}", id, e))?;
+        log::debug!("[PolyPizza] model detail: {:.1200}", body);
+        extract_download_url_v1(&body)
+            .ok_or_else(|| format!("[PolyPizza] no Download URL in model detail for '{}': {:.300}", id, body))?
+    };
 
-    log::info!(
-        "[PolyPizza] Downloading {} ({} bytes expected) from {}",
-        id,
-        0,
-        dl_url
-    );
-    let bytes = get_bytes(&dl_url)?;
-    log::info!(
-        "[PolyPizza] Downloaded {} bytes for '{}'",
-        bytes.len(),
-        name
-    );
+    log::info!("[PolyPizza] Downloading '{}' from {}", name, dl_url);
+    let bytes = authed_get_bytes(&dl_url)?;
+    log::info!("[PolyPizza] Downloaded {} bytes for '{}'", bytes.len(), name);
 
     Ok(ModelDownload {
-        id: id.to_string(),
-        name: name.to_string(),
-        author: author.to_string(),
-        license: license.to_string(),
+        id:         id.to_string(),
+        name:       name.to_string(),
+        author:     author.to_string(),
+        license:    license.to_string(),
         source_url: src.to_string(),
-        file_ext: ext,
+        file_ext:   ext,
         bytes,
     })
 }
 
 // ─── JSON parsing (no serde dependency) ──────────────────────────────────────
 //
-// Poly Pizza JSON structure (from pizzabox reference):
-// { "results": [
-//     { "ID": "7S5Snphkam", "Title": "Cactus",
-//       "Creator": { "DisplayName": "SoyMaria" },
-//       "Licence": "CC-BY",
-//       "Thumbnail": "https://...",
-//       "Assets": [ { "Type": "Source", "URL": "https://...glb" } ]
+// Poly Pizza v1.1 API JSON structure (from the official OpenAPI spec):
+// {
+//   "total": 77,
+//   "results": [
+//     {
+//       "ID": "BwwnUrWGmV",
+//       "Title": "Police Car",
+//       "Attribution": "...",
+//       "Thumbnail": "https://static.poly.pizza/....webp",
+//       "Download":   "https://static.poly.pizza/....glb",
+//       "Creator": { "Username": "Quaternius", "DPURL": "..." },
+//       "Licence": "CC0 1.0",
+//       "Animated": false
 //     }
 //   ]
 // }
+//
+// /model/{id} response has identical field names.
 
-fn parse_explore(body: &str) -> Option<Vec<ModelSummary>> {
-    // Try "results", then "items", then "unity" (poly.pizza also returns unity assets)
-    let arr = find_json_array(body, "results")
-        .or_else(|| find_json_array(body, "items"))
-        .or_else(|| find_json_array(body, "unity"))?;
-
+fn parse_explore_v1(body: &str) -> Option<Vec<ModelSummary>> {
+    let arr = find_json_array(body, "results")?;
     let objs = split_json_objects(arr);
     log::debug!("[PolyPizza] {} raw objects to parse", objs.len());
 
     let out: Vec<ModelSummary> = objs
         .iter()
-        .filter_map(|o| {
-            let s = parse_summary(o);
-            if s.is_none() {
-                log::debug!("[PolyPizza] parse_summary failed for obj: {:.100}", o);
-            }
-            s
-        })
+        .filter_map(|o| parse_summary_v1(o))
         .collect();
     log::info!("[PolyPizza] parsed {} summaries", out.len());
     Some(out)
 }
 
-fn parse_summary(obj: &str) -> Option<ModelSummary> {
-    // Actual Poly Pizza API (observed response):
-    // "publicID":"fnFCCFiHbQt" — string slug (the real ID)
-    // "title":"Space probe"   — lowercase
-    // "creator":{"username":"Poly by Google"} — lowercase
-    // "licence":"CC-BY 3.0"   — lowercase
-    // "previewUrl":"https://..."
-    // "url":"/m/fnFCCFiHbQt"
-    // "publicID" is the string slug; "id" is a useless integer; "url"="/m/{slug}" fallback
-    let id = json_str(obj, "publicID")
-        .or_else(|| json_str(obj, "ID"))
-        .or_else(|| {
-            json_str(obj, "url").and_then(|u| {
-                if u.len() > 3 && &u[..3] == "/m/" {
-                    Some(u[3..].to_string())
-                } else {
-                    None
-                }
-            })
-        })?;
-    let name = json_str(obj, "title")
-        .or_else(|| json_str(obj, "Title"))
-        .or_else(|| json_str(obj, "alt"))
-        .unwrap_or_default();
-    let author = json_nested_str(obj, "creator", "username")
-        .or_else(|| json_nested_str(obj, "Creator", "DisplayName"))
-        .or_else(|| json_nested_str(obj, "Creator", "Username"))
-        .unwrap_or_default();
-    let license = json_str(obj, "licence")
-        .or_else(|| json_str(obj, "Licence"))
-        .or_else(|| json_str(obj, "license"))
-        .unwrap_or_else(|| "CC-BY".to_string());
-    let thumbnail_url = json_str(obj, "previewUrl")
-        .or_else(|| json_str(obj, "Thumbnail"))
-        .unwrap_or_default();
+fn parse_summary_v1(obj: &str) -> Option<ModelSummary> {
+    // v1.1 field names are PascalCase: ID, Title, Creator.Username, Licence
+    let id = json_str(obj, "ID")?;
+    let name = json_str(obj, "Title").unwrap_or_default();
+    let author = json_nested_str(obj, "Creator", "Username").unwrap_or_default();
+    let license = json_str(obj, "Licence").unwrap_or_else(|| "CC0".to_string());
+    let thumbnail_url = json_str(obj, "Thumbnail").unwrap_or_default();
+    // The v1.1 search results include a direct Download URL — store it in
+    // source_url so we can skip the /model/{id} round-trip when possible.
+    let download_url = json_str(obj, "Download").unwrap_or_default();
     let source_url = format!("https://poly.pizza/m/{}", id);
     Some(ModelSummary {
         id,
@@ -304,45 +319,25 @@ fn parse_summary(obj: &str) -> Option<ModelSummary> {
         license,
         thumbnail_url,
         source_url,
+        download_url,
     })
 }
 
-fn extract_download_url(body: &str) -> Option<(String, String)> {
-    // Try Assets array — prefer "Source" type entry
-    if let Some(assets) = find_json_array(body, "Assets") {
-        let objs = split_json_objects(assets);
-        // First pass: explicit Source/GLB type
-        for obj in &objs {
-            let t = json_str(obj, "Type").unwrap_or_default().to_lowercase();
-            if t == "source" || t == "glb" || t == "fbx" {
-                if let Some(url) = json_str(obj, "URL").or_else(|| json_str(obj, "url")) {
-                    return Some((url.clone(), url_ext(&url)));
-                }
-            }
-        }
-        // Second pass: any asset with a 3D file extension
-        for obj in &objs {
-            if let Some(url) = json_str(obj, "URL").or_else(|| json_str(obj, "url")) {
-                if url.contains(".glb") || url.contains(".fbx") || url.contains(".obj") {
-                    return Some((url.clone(), url_ext(&url)));
-                }
-            }
+/// Extract the CDN download URL from a v1.1 /model/{id} response.
+/// The `Download` field is a direct HTTPS GLB URL.
+fn extract_download_url_v1(body: &str) -> Option<(String, String)> {
+    // Primary: flat "Download" field (v1.1 spec)
+    if let Some(url) = json_str(body, "Download") {
+        if !url.is_empty() {
+            return Some((url.clone(), url_ext(&url)));
         }
     }
-    // Flat Download/download field
-    if let Some(url) = json_str(body, "Download").or_else(|| json_str(body, "download")) {
-        return Some((url.clone(), url_ext(&url)));
-    }
-
-    // Last resort: scan for any .glb/.fbx URL in the response body
-    // The CDN URL pattern is: https://static.poly.pizza/.../*.glb
+    // Fallback: scan for any CDN 3D URL in the body
     for needle in &[".glb", ".fbx", ".obj"] {
         if let Some(pos) = body.find(needle) {
-            // Walk back to find the opening quote of the URL
             let before = &body[..pos];
             if let Some(q) = before.rfind('"') {
-                let url = &before[q + 1..];
-                let url = format!("{}{}", url, &needle[..needle.len() - 1]);
+                let url = format!("{}{}", &before[q + 1..], &needle[..needle.len() - 1]);
                 if url.starts_with("http") {
                     return Some((url, url_ext(needle)));
                 }
@@ -362,6 +357,16 @@ fn url_ext(url: &str) -> String {
 }
 
 // ─── Tiny zero-dependency JSON helpers ───────────────────────────────────────
+
+/// Extract a JSON number value (integer or float) by key.
+fn json_number(s: &str, key: &str) -> Option<f64> {
+    let needle = format!("\"{}\":", key);
+    let start  = s.find(needle.as_str())? + needle.len();
+    let rest   = s[start..].trim_start();
+    let end    = rest.find(|c: char| !c.is_ascii_digit() && c != '.' && c != '-')
+        .unwrap_or(rest.len());
+    rest[..end].parse().ok()
+}
 
 fn json_str(s: &str, key: &str) -> Option<String> {
     let needle = format!("\"{}\":", key);

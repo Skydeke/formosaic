@@ -16,6 +16,8 @@ pub trait NodeBehavior: NodeChildren {
     fn process(&mut self) {}
     fn cleanup(&mut self) {}
     fn as_any(&self) -> &dyn Any;
+    /// Mutable downcast — override in types that need it (e.g. `UiNode`).
+    fn as_any_mut(&mut self) -> &mut dyn Any { panic!("as_any_mut not implemented for {}", self.get_name()) }
 }
 
 pub struct Node {

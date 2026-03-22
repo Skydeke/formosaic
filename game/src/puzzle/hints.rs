@@ -32,8 +32,9 @@ use cgmath::{InnerSpace, Vector3};
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum HintTier {
+    #[default]
     None  = 0,
     WarmCold = 1,
     AxisPlane = 2,

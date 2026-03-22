@@ -109,9 +109,14 @@ pub fn best_scramble_axis(
     // without touching the real GPU-backed mesh data.
     let positions = model_positions_flat(model);
 
+    // Restrict elevation to ±55° from horizontal so the solution axis is never
+    // nearly vertical (top/bottom).  A top-down axis is degenerate: the model
+    // looks similar from a wide cone of directions, making the puzzle unclear.
+    const MAX_ELEV: f32 = 55.0 * PI / 180.0;   // 55° in radians
+
     for _ in 0..candidates {
         let theta: f32 = rng.random_range(0.0..2.0 * PI);
-        let phi: f32   = rng.random_range(-PI / 2.0..PI / 2.0);
+        let phi: f32   = rng.random_range(-MAX_ELEV..MAX_ELEV);
         let axis = Vector3::new(
             phi.cos() * theta.cos(),
             phi.sin(),

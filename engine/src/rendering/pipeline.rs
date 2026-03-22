@@ -1,9 +1,9 @@
 //! Generic render pipeline — orchestrates geometry → lighting → late → overlay
-//! passes each frame.
+//! passes each frame, then imgui on top.
 //!
-//! The pipeline only constructs `EntityRenderer` by default. Game-specific
-//! renderers (hints, shine, menu) are registered by the game layer via
-//! `add_renderer()` after construction.
+//! Pass order and registration:
+//!   `add_renderer()`       — geometry, late, or overlay renderers (sorted by pass)
+//!   `add_imgui_renderer()` — the Dear ImGui renderer; always runs last, after overlay
 
 use crate::{
     architecture::scene::{entity::simple_entity::SimpleEntity, scene_context::SceneContext},
@@ -36,7 +36,11 @@ use cgmath::Vector2;
 use std::{cell::RefCell, rc::Rc};
 
 pub struct Pipeline {
+    /// General renderers — geometry, late, overlay — sorted by pass internally.
     renderers:     Vec<Box<dyn IRenderer>>,
+    /// Dedicated imgui renderer — always runs after all other passes.
+    /// Stored separately so it can be accessed directly without any downcast.
+    imgui:         Option<ImguiGlRenderer>,
     context:       Rc<RefCell<SceneContext>>,
     deferred_fbo:  Fbo,
     lighting_pass: LightingPass,
@@ -44,36 +48,40 @@ pub struct Pipeline {
 }
 
 impl Pipeline {
-    /// Create a pipeline with only `EntityRenderer` registered.
-    /// Call `add_renderer()` to register game-specific renderers before drawing.
     pub fn new(context: Rc<RefCell<SceneContext>>) -> Self {
-        let deferred_fbo  = Self::create_deferred_fbo(1, 1);
-        let lighting_pass = LightingPass::new();
-        let scene_fbo     = SceneFbo::new(1, 1);
-
         let mut pipeline = Self {
-            renderers: Vec::new(),
+            renderers:     Vec::new(),
+            imgui:         None,
             context,
-            deferred_fbo,
-            lighting_pass,
-            scene_fbo,
+            deferred_fbo:  Self::create_deferred_fbo(1, 1),
+            lighting_pass: LightingPass::new(),
+            scene_fbo:     SceneFbo::new(1, 1),
         };
-
         pipeline.add_renderer(Box::new(
             EntityRenderer::<SimpleEntity>::new().expect("Can't create EntityRenderer."),
         ));
-
         pipeline
     }
 
-    /// Register any renderer. Pass order determines draw order within each pass.
+    /// Register a geometry / late / overlay renderer.
     pub fn add_renderer(&mut self, r: Box<dyn IRenderer>) {
         self.renderers.push(r);
     }
 
-    /// Register the imgui renderer — must be added last so it draws on top.
+    /// Register the Dear ImGui renderer — runs after all other passes every frame.
+    /// Only one imgui renderer is supported; a second call replaces the first.
     pub fn add_imgui_renderer(&mut self, r: ImguiGlRenderer) {
-        self.renderers.push(Box::new(r));
+        self.imgui = Some(r);
+    }
+
+    /// Direct access to the imgui renderer (no downcast needed).
+    pub fn imgui_renderer(&self) -> Option<&ImguiGlRenderer> {
+        self.imgui.as_ref()
+    }
+
+    /// Direct mutable access to the imgui renderer.
+    pub fn imgui_renderer_mut(&mut self) -> Option<&mut ImguiGlRenderer> {
+        self.imgui.as_mut()
     }
 
     /// Draw one frame. `SceneContext` must already reflect current game state.
@@ -87,14 +95,10 @@ impl Pipeline {
             self.deferred_fbo.resize(width as i32, height as i32);
         }
 
-        // Expose resolved G-buffer textures via SceneContext so overlay
-        // renderers (e.g. ShineRenderer) can sample them without pipeline coupling.
         {
             use crate::rendering::render_output_data::RenderOutputData;
             use crate::opengl::fbos::simple_texture::SimpleTexture;
             let a = self.deferred_fbo.get_attachments();
-            // Colour attachments: [0]=albedo, [1]=normal, [2]=position.
-            // Depth is stored separately in depth_attachment, NOT in this vec.
             if a.len() >= 3 {
                 let colour_id   = a[0].get_texture().get_id();
                 let normal_id   = a[1].get_texture().get_id();
@@ -119,6 +123,7 @@ impl Pipeline {
         self.lighting_pass();
         self.late_pass();
         self.overlay_pass();
+        self.imgui_pass();
         self.finish_pass();
     }
 
@@ -170,8 +175,17 @@ impl Pipeline {
         }
     }
 
+    /// Imgui pass — always last, after overlay.
+    fn imgui_pass(&mut self) {
+        let ctx = self.context.borrow();
+        if let Some(r) = &mut self.imgui {
+            r.render(&ctx);
+        }
+    }
+
     fn finish_pass(&mut self) {
         for r in &mut self.renderers { r.finish(); }
+        if let Some(r) = &mut self.imgui { r.finish(); }
     }
 
     fn create_deferred_fbo(w: i32, h: i32) -> Fbo {

@@ -28,8 +28,9 @@ pub trait Application {
     /// Configure the imgui context (theme, fonts, DPI) once at startup.
     fn configure_imgui(&self, imgui: &mut imgui::Context, scale: f32);
 
-    /// Build the imgui UI for this frame.  Called inside the imgui frame.
-    fn build_ui(&mut self, ui: &imgui::Ui, w: f32, h: f32, ctx: &mut SceneContext);
+    // Note: UI panels are no longer defined here. Instead, attach `UiNode`
+    // instances to the scene graph — the engine collects and renders them
+    // automatically each frame. See `architecture::scene::node::ui_node`.
 
     // ── Platform hints ────────────────────────────────────────────────────
     /// The window title shown in the OS title bar.
