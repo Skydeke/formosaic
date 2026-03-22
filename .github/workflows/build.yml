@@ -26,6 +26,8 @@ jobs:
         run: cargo setup-android
 
       - name: Build desktop release
+        env:
+          POLY_PIZZA_API_KEY: ${{ secrets.POLY_PIZZA_API_KEY }}
         run: cargo build-desktop-release
 
       - name: Upload artifact
@@ -58,9 +60,13 @@ jobs:
         run: echo "$ANDROID_KEYSTORE_B64" | base64 -d > game/release.keystore
 
       - name: Build APK (debug)
+        env:
+          POLY_PIZZA_API_KEY: ${{ secrets.POLY_PIZZA_API_KEY }}
         run: cargo build-android
 
       - name: Build APK (release)
+        env:
+          POLY_PIZZA_API_KEY: ${{ secrets.POLY_PIZZA_API_KEY }}
         run: cargo build-android-release
 
       - name: Upload APKs
