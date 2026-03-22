@@ -57,6 +57,9 @@ target_sdk_version = 33
 min_sdk_version    = 21
 
 [[package.metadata.android.uses_permission]]
+name = "android.permission.INTERNET"
+
+[[package.metadata.android.uses_permission]]
 name = "android.permission.WRITE_EXTERNAL_STORAGE"
 
 [package.metadata.android.application.activity]
