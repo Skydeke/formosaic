@@ -43,14 +43,13 @@ crate-type = ["cdylib"]
 [package.metadata.android]
 package     = "com.formosaic.game"
 apk_name    = "Formosaic"
-label       = "Formosaic"
-icon        = "@mipmap/ic_launcher"
-orientation = "sensorLandscape"
 resources   = "assets/res"
 assets      = "assets/3d"
 
 [package.metadata.android.application]
 theme = "@android:style/Theme.DeviceDefault.NoActionBar.Fullscreen"
+icon  = "@mipmap/ic_launcher"
+label = "Formosaic"
 
 [package.metadata.android.sdk]
 target_sdk_version = 33
@@ -58,7 +57,6 @@ min_sdk_version    = 21
 
 [[package.metadata.android.uses_permission]]
 name = "android.permission.INTERNET"
-
 [[package.metadata.android.uses_permission]]
 name = "android.permission.WRITE_EXTERNAL_STORAGE"
 

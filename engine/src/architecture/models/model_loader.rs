@@ -1,11 +1,10 @@
 //! Model loader — parses mesh data from raw bytes using assimp.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
 use std::rc::Rc;
 
 use cgmath::{Vector3, Vector4};
-use russimp_ng::material::Material as AiMaterial;
+use russimp_ng::material::{Material as AiMaterial, TextureType};
 use russimp_ng::mesh::Mesh as AiMesh;
 use russimp_ng::scene::{PostProcess, Scene};
 
@@ -25,11 +24,6 @@ impl ModelLoader {
             return model;
         }
 
-        // Extract embedded textures BEFORE Assimp parses the file, directly
-        // from the raw GLB bytes. russimp-ng does not expose scene.textures,
-        // so we parse the GLB JSON+BIN chunks ourselves.
-        let embedded = Self::extract_glb_textures(bytes);
-
         let scene = Scene::from_buffer(
             bytes,
             vec![
@@ -47,11 +41,7 @@ impl ModelLoader {
         let mut sum = Vector3::new(0.0f32, 0.0, 0.0);
         let mut count = 0usize;
 
-        let materials: Vec<Material> = scene
-            .materials
-            .iter()
-            .map(|m| Self::process_material(m, &embedded))
-            .collect();
+        let materials: Vec<Material> = scene.materials.iter().map(Self::process_material).collect();
 
         let meshes: Vec<Mesh> = scene
             .meshes
@@ -94,127 +84,59 @@ impl ModelLoader {
         Self::load_from_bytes(path, bytes, hint)
     }
 
-    // ── GLB embedded texture extraction ──────────────────────────────────────
+    fn convert_texture(tex: &russimp_ng::material::Texture) -> Option<Rc<dyn Texture>> {
+        match &tex.data {
+            russimp_ng::material::DataContent::Bytes(bytes) => {
+                if tex.height > 0 {
+                    // ── RAW DATA (not compressed!) ──
+                    let expected_size = (tex.width * tex.height * 4) as usize;
 
-    /// Parse a GLB file's JSON+BIN chunks and extract all embedded images.
-    /// Returns a map from image index (0, 1, …) to an uploaded GL texture.
-    /// Returns an empty map for non-GLB files or on any parse error.
-    fn extract_glb_textures(bytes: &[u8]) -> HashMap<usize, Rc<dyn Texture>> {
-        let mut map = HashMap::new();
+                    if bytes.len() != expected_size {
+                        log::error!(
+                            "[Texture] Raw embedded texture size mismatch: got={}, expected={}",
+                            bytes.len(),
+                            expected_size
+                        );
+                        return None;
+                    }
 
-        // GLB magic: 0x46546c67 ("glTF" little-endian)
-        if bytes.len() < 12 {
-            return map;
-        }
-        let magic = u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
-        if magic != 0x46546c67 {
-            return map; // not a GLB file
-        }
+                    return Some(Rc::new(ModelLoader::upload_rgba_texture(
+                        tex.width, tex.height, bytes,
+                    )));
+                }
 
-        // JSON chunk starts at offset 12
-        if bytes.len() < 20 {
-            return map;
-        }
-        let json_len = u32::from_le_bytes([bytes[12], bytes[13], bytes[14], bytes[15]]) as usize;
-        let json_type = u32::from_le_bytes([bytes[16], bytes[17], bytes[18], bytes[19]]);
-        if json_type != 0x4E4F534A {
-            return map; // first chunk is not JSON
-        }
-        let json_end = 20 + json_len;
-        if bytes.len() < json_end {
-            return map;
-        }
-        let gltf: serde_json::Value = match serde_json::from_slice(&bytes[20..json_end]) {
-            Ok(v) => v,
-            Err(e) => {
-                log::warn!("[ModelLoader] GLB JSON parse failed: {}", e);
-                return map;
-            }
-        };
+                // ── COMPRESSED (PNG/JPG) ──
+                use image::io::Reader as ImageReader;
+                use std::io::Cursor;
 
-        // BIN chunk starts right after JSON chunk
-        let bin_header_start = json_end;
-        if bytes.len() < bin_header_start + 8 {
-            return map;
-        }
-        let bin_len = u32::from_le_bytes([
-            bytes[bin_header_start],
-            bytes[bin_header_start + 1],
-            bytes[bin_header_start + 2],
-            bytes[bin_header_start + 3],
-        ]) as usize;
-        let bin_type = u32::from_le_bytes([
-            bytes[bin_header_start + 4],
-            bytes[bin_header_start + 5],
-            bytes[bin_header_start + 6],
-            bytes[bin_header_start + 7],
-        ]);
-        if bin_type != 0x004E4942 {
-            return map; // second chunk is not BIN
-        }
-        let bin_start = bin_header_start + 8;
-        let bin_end = bin_start + bin_len;
-        if bytes.len() < bin_end {
-            return map;
-        }
-        let bin = &bytes[bin_start..bin_end];
-
-        // Extract each image referenced by bufferView
-        let images = match gltf["images"].as_array() {
-            Some(a) => a,
-            None => return map,
-        };
-        let buffer_views = match gltf["bufferViews"].as_array() {
-            Some(a) => a,
-            None => return map,
-        };
-
-        for (img_idx, img) in images.iter().enumerate() {
-            let bv_idx = match img["bufferView"].as_u64() {
-                Some(i) => i as usize,
-                None => continue,
-            };
-            if bv_idx >= buffer_views.len() {
-                continue;
-            }
-            let bv = &buffer_views[bv_idx];
-            let bv_offset = bv["byteOffset"].as_u64().unwrap_or(0) as usize;
-            let bv_length = match bv["byteLength"].as_u64() {
-                Some(l) => l as usize,
-                None => continue,
-            };
-            if bv_offset + bv_length > bin.len() {
-                continue;
-            }
-
-            let img_bytes = &bin[bv_offset..bv_offset + bv_length];
-
-            // Decode with the `image` crate
-            use image::io::Reader as ImageReader;
-            use std::io::Cursor;
-            let decoded = (|| -> Option<(u32, u32, Vec<u8>)> {
-                let reader = ImageReader::new(Cursor::new(img_bytes))
+                let img = ImageReader::new(Cursor::new(bytes))
                     .with_guessed_format()
-                    .ok()?;
-                let img = reader.decode().ok()?;
-                let rgba = img.into_rgba8();
-                let (w, h) = (rgba.width(), rgba.height());
-                Some((w, h, rgba.into_raw()))
-            })();
+                    .ok()?
+                    .decode()
+                    .ok()?
+                    .into_rgba8();
 
-            match decoded {
-                Some((w, h, rgba)) => {
-                    let gl_tex = Self::upload_rgba_texture(w, h, &rgba);
-                    log::info!("[ModelLoader] GLB image {} uploaded ({}×{})", img_idx, w, h);
-                    map.insert(img_idx, Rc::new(gl_tex) as Rc<dyn Texture>);
+                let (w, h) = (img.width(), img.height());
+                let rgba = img.into_raw();
+
+                Some(Rc::new(ModelLoader::upload_rgba_texture(w, h, &rgba)))
+            }
+
+            russimp_ng::material::DataContent::Texel(texels) => {
+                // rarely used for embedded, but keep it
+                let mut rgba = Vec::with_capacity(texels.len() * 4);
+                for t in texels {
+                    rgba.push(t.r);
+                    rgba.push(t.g);
+                    rgba.push(t.b);
+                    rgba.push(t.a);
                 }
-                None => {
-                    log::warn!("[ModelLoader] GLB image {}: decode failed", img_idx);
-                }
+
+                Some(Rc::new(ModelLoader::upload_rgba_texture(
+                    tex.width, tex.height, &rgba,
+                )))
             }
         }
-
-        map
     }
 
     /// Upload raw RGBA bytes as a GL_TEXTURE_2D and return a SimpleTexture.
@@ -323,10 +245,7 @@ impl ModelLoader {
     ///
     /// `embedded` maps GLB image indices to already-uploaded GL textures.
     /// When the material's `$tex.file` property is `"*N"`, we look up index N.
-    fn process_material(
-        ai_material: &AiMaterial,
-        embedded: &HashMap<usize, Rc<dyn Texture>>,
-    ) -> Material {
+    fn process_material(ai_material: &AiMaterial) -> Material {
         let mut mat = Material::default();
         for prop in &ai_material.properties {
             log::debug!(
@@ -385,58 +304,39 @@ impl ModelLoader {
                         }
                     }
                 }
-                "$tex.file" | "$tex.diffuse" => {
-                    if let russimp_ng::material::PropertyTypeInfo::String(path) = &prop.data {
-                        if let Some(rest) = path.strip_prefix('*') {
-                            if let Ok(idx) = rest.parse::<usize>() {
-                                if let Some(tex) = embedded.get(&idx) {
-                                    // TODO: handle multiple diffuse textures
-                                    log::debug!("[TODO] set diffuse texture idx={}", idx);
-                                    mat.diffuse_texture = Some(tex.clone());
-                                }
-                            }
-                        }
-                    }
-                }
-                "$tex.normal" => {
-                    if let russimp_ng::material::PropertyTypeInfo::String(path) = &prop.data {
-                        if let Some(rest) = path.strip_prefix('*') {
-                            if let Ok(idx) = rest.parse::<usize>() {
-                                if let Some(tex) = embedded.get(&idx) {
-                                    // TODO: store normal texture in Material
-                                    log::debug!("[TODO] set normal texture idx={}", idx);
-                                }
-                            }
-                        }
-                    }
-                }
-                "$tex.specular" => {
-                    if let russimp_ng::material::PropertyTypeInfo::String(path) = &prop.data {
-                        if let Some(rest) = path.strip_prefix('*') {
-                            if let Ok(idx) = rest.parse::<usize>() {
-                                if let Some(tex) = embedded.get(&idx) {
-                                    // TODO: store specular texture in Material
-                                    log::debug!("[TODO] set specular texture idx={}", idx);
-                                }
-                            }
-                        }
-                    }
-                }
-                "$tex.emissive" => {
-                    if let russimp_ng::material::PropertyTypeInfo::String(path) = &prop.data {
-                        if let Some(rest) = path.strip_prefix('*') {
-                            if let Ok(idx) = rest.parse::<usize>() {
-                                if let Some(tex) = embedded.get(&idx) {
-                                    // TODO: store emissive texture in Material
-                                    log::debug!("[TODO] set emissive texture idx={}", idx);
-                                }
-                            }
-                        }
-                    }
-                }
                 _ => {}
             }
         }
+
+        // ── TEXTURES (NEW, CLEAN WAY) ──
+
+        // Diffuse / BaseColor
+        if let Some(tex) = ai_material
+            .textures
+            .get(&TextureType::BaseColor)
+            .or_else(|| ai_material.textures.get(&TextureType::Diffuse))
+        {
+            let tex = tex.borrow();
+            if let Some(gl_tex) = Self::convert_texture(&tex) {
+                mat.diffuse_texture = Some(gl_tex);
+            }
+        }
+
+        // Normal map
+        if let Some(tex) = ai_material.textures.get(&TextureType::Normals) {
+            let tex = tex.borrow();
+            if let Some(gl_tex) = Self::convert_texture(&tex) {
+                mat.normal_texture = Some(gl_tex);
+            }
+        }
+
+        // Specular
+        // if let Some(tex) = ai_material.textures.get(&TextureType::Specular) {
+        //     let tex = tex.borrow();
+        //     if let Some(gl_tex) = convert_texture(&tex) {
+        //         mat.specular_texture = Some(gl_tex);
+        //     }
+        // }
 
         mat
     }
