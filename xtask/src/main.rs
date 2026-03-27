@@ -2,13 +2,14 @@
 //!
 //! Run via cargo aliases defined in .cargo/config.toml:
 //!
-//!   cargo setup-android          Download Android SDK/NDK, install Rust targets
-//!   cargo check-android          Verify the Android toolchain is ready
-//!   cargo android                Build + install + run debug APK
-//!   cargo android-release        Build + install + run release APK
-//!   cargo build-android          Build debug APK only
-//!   cargo build-android-release  Build release APK only
-//!   cargo clean-all              Remove all build artefacts
+//!   cargo generate-icons          Generate Android mipmap PNGs from assets/icons/*.png
+//!   cargo setup-android           Download Android SDK/NDK, install Rust targets
+//!   cargo check-android           Verify the Android toolchain is ready
+//!   cargo android                 Build + install + run debug APK
+//!   cargo android-release         Build + install + run release APK
+//!   cargo build-android           Build debug APK only
+//!   cargo build-android-release   Build release APK only
+//!   cargo clean-all               Remove all build artefacts
 
 use std::{
     env, fs,
@@ -19,7 +20,8 @@ use std::{
 fn main() {
     let task = env::args().nth(1).unwrap_or_else(|| {
         eprintln!("Usage: cargo <task>");
-        eprintln!("Tasks: setup-android  check-android  android  android-release");
+        eprintln!("Tasks: generate-icons");
+        eprintln!("       setup-android  check-android  android  android-release");
         eprintln!("       build-android  build-android-release  clean-all");
         process::exit(1);
     });
@@ -27,6 +29,7 @@ fn main() {
     let workspace = workspace_root();
 
     match task.as_str() {
+        "generate-icons"        => generate_icons(&workspace),
         "setup-android"         => setup_android(&workspace),
         "check-android"         => check_android(&workspace),
         "android"               => android_run(&workspace, false),
@@ -54,62 +57,139 @@ fn cmdline_tools(workspace: &Path) -> PathBuf {
     sdk_dir(workspace).join("cmdline-tools/latest")
 }
 
-const NDK_VERSION:      &str = "25.2.9519653";
+const NDK_VERSION:       &str = "25.2.9519653";
 const CMDLINE_TOOLS_URL: &str =
     "https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip";
 
+// ── Icon generation ───────────────────────────────────────────────────────────
+
+/// Generate all Android mipmap icon sizes from assets/icons/{fg,bg}.png using
+/// ImageMagick (magick).  Source PNGs live at assets/icons/ in the workspace
+/// root; generated files go into game/assets/res/mipmap-*/
+fn generate_icons(workspace: &Path) {
+    if !command_exists("magick") {
+        eprintln!("❌ ImageMagick (magick) is required — install it first.");
+        process::exit(1);
+    }
+
+    let icons_dir = workspace.join("assets/icons");
+    let fg_src    = icons_dir.join("ic_launcher_foreground.png");
+    let bg_src    = icons_dir.join("ic_launcher_background.png");
+
+    for src in [&fg_src, &bg_src] {
+        if !src.exists() {
+            eprintln!("❌ Missing source icon: {}", src.display());
+            eprintln!("   Place ic_launcher_foreground.png and ic_launcher_background.png");
+            eprintln!("   inside assets/icons/ in the workspace root.");
+            process::exit(1);
+        }
+    }
+
+    let res_dir = workspace.join("game/assets/res");
+
+    // Remove old mipmap dirs so stale sizes never linger
+    if let Ok(entries) = fs::read_dir(&res_dir) {
+        for entry in entries.flatten() {
+            let name = entry.file_name();
+            let name = name.to_string_lossy();
+            if name.starts_with("mipmap-") && name != "mipmap-anydpi-v26" {
+                fs::remove_dir_all(entry.path()).ok();
+            }
+        }
+    }
+
+    const SIZES: &[(&str, u32)] = &[
+        ("mipmap-mdpi",    48),
+        ("mipmap-hdpi",    72),
+        ("mipmap-xhdpi",   96),
+        ("mipmap-xxhdpi",  144),
+        ("mipmap-xxxhdpi", 192),
+    ];
+
+    println!("🚀 Generating Android icons from assets/icons/…");
+
+    for (dir, size) in SIZES {
+        let out_dir = res_dir.join(dir);
+        fs::create_dir_all(&out_dir).unwrap();
+        println!("   → {dir} ({size}×{size})");
+
+        let sz = format!("{size}x{size}");
+        let fg_out = out_dir.join("ic_launcher_foreground.png");
+        let bg_out = out_dir.join("ic_launcher_background.png");
+        let ic_out = out_dir.join("ic_launcher.png");
+
+        // Foreground — preserve transparency
+        run_cmd(Command::new("magick").args([
+            fg_src.to_str().unwrap(),
+            "-resize", &sz, "-background", "none",
+            "-gravity", "center", "-extent", &sz, "-alpha", "on",
+            fg_out.to_str().unwrap(),
+        ]));
+
+        // Background
+        run_cmd(Command::new("magick").args([
+            bg_src.to_str().unwrap(),
+            "-resize", &sz,
+            bg_out.to_str().unwrap(),
+        ]));
+
+        // Legacy flattened icon
+        run_cmd(Command::new("magick").args([
+            bg_src.to_str().unwrap(), fg_src.to_str().unwrap(),
+            "-resize", &sz, "-gravity", "center",
+            "-compose", "over", "-composite",
+            ic_out.to_str().unwrap(),
+        ]));
+    }
+
+    // Adaptive icon XML
+    let adaptive_dir = res_dir.join("mipmap-anydpi-v26");
+    fs::create_dir_all(&adaptive_dir).unwrap();
+    fs::write(
+        adaptive_dir.join("ic_launcher.xml"),
+        "<adaptive-icon xmlns:android=\"http://schemas.android.com/apk/res/android\">\n\
+         \x20   <background android:drawable=\"@mipmap/ic_launcher_background\"/>\n\
+         \x20   <foreground android:drawable=\"@mipmap/ic_launcher_foreground\"/>\n\
+         </adaptive-icon>\n",
+    ).unwrap();
+
+    println!("✅ Icons generated successfully.");
+}
+
 // ── Android build helpers ─────────────────────────────────────────────────────
 
-/// Build the bindgen sysroot args for a given NDK path and ABI triple.
 fn bindgen_args(ndk: &Path, abi_triple: &str) -> String {
     let sysroot = ndk.join("toolchains/llvm/prebuilt/linux-x86_64/sysroot");
     format!(
         "--sysroot={} -I{}/usr/include -I{}/usr/include/{}",
-        sysroot.display(),
-        sysroot.display(),
-        sysroot.display(),
-        abi_triple,
+        sysroot.display(), sysroot.display(), sysroot.display(), abi_triple,
     )
 }
 
-/// Run a cargo-apk command with all required Android env vars set correctly.
 fn cargo_apk(workspace: &Path, apk_args: &[&str]) {
-    let ndk = ndk_home(workspace);
-    let sdk = sdk_dir(workspace);
+    let ndk      = ndk_home(workspace);
+    let sdk      = sdk_dir(workspace);
     let toolchain = ndk.join("toolchains/llvm/prebuilt/linux-x86_64/bin");
 
-    // bindgen needs the NDK sysroot so it doesn't pick up host /usr/include.
-    // cargo:rustc-env in build.rs only propagates to the crate being compiled,
-    // NOT to dependency build scripts.  We must set it in the process env here.
     let bindgen_aarch64 = bindgen_args(&ndk, "aarch64-linux-android");
     let bindgen_armv7   = bindgen_args(&ndk, "arm-linux-androideabi");
 
     let mut cmd = Command::new("cargo");
-    cmd.arg("apk");
-    cmd.args(apk_args);
-    cmd.current_dir(workspace);
-
-    // SDK / NDK locations
+    cmd.arg("apk").args(apk_args).current_dir(workspace);
     cmd.env("ANDROID_HOME",     &sdk);
     cmd.env("ANDROID_NDK_HOME", &ndk);
     cmd.env("ANDROID_NDK_ROOT", &ndk);
 
-    // PATH — needed so cargo-apk can find adb, sdkmanager, etc.
     let orig_path = env::var("PATH").unwrap_or_default();
-    let new_path  = format!(
+    cmd.env("PATH", format!(
         "{}:{}:{}",
         toolchain.display(),
         sdk.join("platform-tools").display(),
         orig_path,
-    );
-    cmd.env("PATH", new_path);
+    ));
 
-    // Suppress C/C++ warnings from vendored assimp.
-    cmd.env("CFLAGS_aarch64_linux_android",    "-w");
-    cmd.env("CXXFLAGS_aarch64_linux_android",  "-w");
-
-    // Bindgen sysroot args — target-specific variables take priority in bindgen.
-    // These must be in the process env, not cargo:rustc-env, to reach dep build scripts.
+    cmd.env("CFLAGS_aarch64_linux_android",   "-w");
+    cmd.env("CXXFLAGS_aarch64_linux_android", "-w");
     cmd.env("BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android",   &bindgen_aarch64);
     cmd.env("BINDGEN_EXTRA_CLANG_ARGS_armv7_linux_androideabi", &bindgen_armv7);
 
@@ -117,9 +197,7 @@ fn cargo_apk(workspace: &Path, apk_args: &[&str]) {
         eprintln!("Failed to run cargo apk: {e}");
         process::exit(1);
     });
-    if !status.success() {
-        process::exit(status.code().unwrap_or(1));
-    }
+    if !status.success() { process::exit(status.code().unwrap_or(1)); }
 }
 
 fn android_run(workspace: &Path, release: bool) {
@@ -158,10 +236,8 @@ fn setup_android(workspace: &Path) {
         &[
             sdkmanager.to_str().unwrap(),
             &format!("--sdk_root={}", sdk.display()),
-            "platforms;android-33",
-            "build-tools;33.0.2",
-            &format!("ndk;{NDK_VERSION}"),
-            "platform-tools",
+            "platforms;android-33", "build-tools;33.0.2",
+            &format!("ndk;{NDK_VERSION}"), "platform-tools",
         ],
         &[("ANDROID_HOME", sdk.to_str().unwrap())],
         "y\ny\ny\ny\ny\ny\ny\ny\ny\ny\ny\ny\ny\ny\ny\ny\ny\ny\ny\ny\n",
@@ -203,8 +279,7 @@ fn check_android(workspace: &Path) {
 
 fn clean_all(workspace: &Path) {
     println!("🧹 Cleaning…");
-    let status = Command::new("cargo").arg("clean").current_dir(workspace)
-        .status().unwrap();
+    let status = Command::new("cargo").arg("clean").current_dir(workspace).status().unwrap();
     if !status.success() { process::exit(status.code().unwrap_or(1)); }
     println!("✅ Done");
 }
@@ -218,6 +293,14 @@ fn run(args: &[&str]) {
         eprintln!("Command failed: {}", args.join(" "));
         process::exit(status.code().unwrap_or(1));
     }
+}
+
+fn run_cmd(cmd: &mut Command) {
+    let status = cmd.status().unwrap_or_else(|e| {
+        eprintln!("Failed to run command: {e}");
+        process::exit(1);
+    });
+    if !status.success() { process::exit(status.code().unwrap_or(1)); }
 }
 
 fn run_with_stdin(args: &[&str], envs: &[(&str, &str)], stdin_data: &str) {

@@ -1,14 +1,19 @@
 //! Model loader — parses mesh data from raw bytes using assimp.
+//!
+//! Supports the full set of texture types that russimp-ng exposes:
+//! diffuse/base-color, normal, metallic-roughness (ORM), emissive,
+//! occlusion, specular, and lightmap.  All are stored in the engine
+//! Material; the shader decides which to actually sample.
 
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use cgmath::{Vector3, Vector4};
-use russimp_ng::material::{Material as AiMaterial, TextureType};
+use russimp_ng::material::{Material as AiMaterial, PropertyTypeInfo, TextureType};
 use russimp_ng::mesh::Mesh as AiMesh;
 use russimp_ng::scene::{PostProcess, Scene};
 
-use crate::architecture::models::material::Material;
+use crate::architecture::models::material::{AlphaMode, Material};
 use crate::architecture::models::mesh::Mesh;
 use crate::architecture::models::model_cache::ModelCache;
 use crate::architecture::models::simple_model::SimpleModel;
@@ -84,28 +89,28 @@ impl ModelLoader {
         Self::load_from_bytes(path, bytes, hint)
     }
 
+    // ── Texture conversion ────────────────────────────────────────────────────
+
     fn convert_texture(tex: &russimp_ng::material::Texture) -> Option<Rc<dyn Texture>> {
         match &tex.data {
             russimp_ng::material::DataContent::Bytes(bytes) => {
                 if tex.height > 0 {
-                    // ── RAW DATA (not compressed!) ──
-                    let expected_size = (tex.width * tex.height * 4) as usize;
-
-                    if bytes.len() != expected_size {
+                    // Raw (uncompressed) pixel data
+                    let expected = (tex.width * tex.height * 4) as usize;
+                    if bytes.len() != expected {
                         log::error!(
-                            "[Texture] Raw embedded texture size mismatch: got={}, expected={}",
+                            "[Texture] Raw size mismatch: got={}, expected={}",
                             bytes.len(),
-                            expected_size
+                            expected
                         );
                         return None;
                     }
-
-                    return Some(Rc::new(ModelLoader::upload_rgba_texture(
+                    return Some(Rc::new(Self::upload_rgba_texture(
                         tex.width, tex.height, bytes,
                     )));
                 }
 
-                // ── COMPRESSED (PNG/JPG) ──
+                // Compressed (PNG / JPEG / …) — decode with the `image` crate
                 use image::io::Reader as ImageReader;
                 use std::io::Cursor;
 
@@ -117,13 +122,10 @@ impl ModelLoader {
                     .into_rgba8();
 
                 let (w, h) = (img.width(), img.height());
-                let rgba = img.into_raw();
-
-                Some(Rc::new(ModelLoader::upload_rgba_texture(w, h, &rgba)))
+                Some(Rc::new(Self::upload_rgba_texture(w, h, &img.into_raw())))
             }
 
             russimp_ng::material::DataContent::Texel(texels) => {
-                // rarely used for embedded, but keep it
                 let mut rgba = Vec::with_capacity(texels.len() * 4);
                 for t in texels {
                     rgba.push(t.r);
@@ -131,19 +133,18 @@ impl ModelLoader {
                     rgba.push(t.b);
                     rgba.push(t.a);
                 }
-
-                Some(Rc::new(ModelLoader::upload_rgba_texture(
+                Some(Rc::new(Self::upload_rgba_texture(
                     tex.width, tex.height, &rgba,
                 )))
             }
         }
     }
 
-    /// Upload raw RGBA bytes as a GL_TEXTURE_2D and return a SimpleTexture.
+    /// Upload raw RGBA bytes as GL_TEXTURE_2D and return a SimpleTexture.
     fn upload_rgba_texture(w: u32, h: u32, rgba: &[u8]) -> SimpleTexture {
         let tex = SimpleTexture::create();
         log::info!(
-            "[ModelLoader] upload_rgba_texture: id={}, size={}x{}",
+            "[ModelLoader] upload_rgba_texture: id={}, {}x{}",
             tex.get_id(),
             w,
             h
@@ -168,8 +169,8 @@ impl ModelLoader {
                 gl::LINEAR_MIPMAP_LINEAR as i32,
             );
             gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::CLAMP_TO_EDGE as i32);
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::CLAMP_TO_EDGE as i32);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::REPEAT as i32);
+            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::REPEAT as i32);
             gl::BindTexture(gl::TEXTURE_2D, 0);
             let err = gl::GetError();
             if err != gl::NO_ERROR {
@@ -191,10 +192,8 @@ impl ModelLoader {
         for v in &ai_mesh.vertices {
             positions.extend_from_slice(&[v.x, v.y, v.z]);
         }
-        if !ai_mesh.normals.is_empty() {
-            for n in &ai_mesh.normals {
-                normals.extend_from_slice(&[n.x, n.y, n.z]);
-            }
+        for n in &ai_mesh.normals {
+            normals.extend_from_slice(&[n.x, n.y, n.z]);
         }
         if let Some(Some(coords)) = ai_mesh.texture_coords.first() {
             if coords.len() == ai_mesh.vertices.len() {
@@ -215,7 +214,6 @@ impl ModelLoader {
                 indices.push(*idx as u32);
             }
         }
-        // First vertex-color channel (COLOR_0 in glTF/GLB)
         if let Some(Some(chan)) = ai_mesh.colors.first() {
             for c in chan.iter() {
                 colors.push(c.r);
@@ -225,15 +223,12 @@ impl ModelLoader {
             }
         }
 
-        log::info!(
-            "verts={} uvs={}",
+        log::debug!(
+            "[ModelLoader] mesh: verts={} norms={} uvs={} colors={}",
             ai_mesh.vertices.len(),
-            ai_mesh
-                .texture_coords
-                .first()
-                .and_then(|x| x.as_ref())
-                .map(|v| v.len())
-                .unwrap_or(0)
+            ai_mesh.normals.len(),
+            texcoords.len() / 2,
+            colors.len() / 4,
         );
 
         Mesh::from_raw(positions, normals, texcoords, indices, colors)
@@ -241,103 +236,145 @@ impl ModelLoader {
 
     // ── Material processing ───────────────────────────────────────────────────
 
-    /// Build a material from Assimp properties.
-    ///
-    /// `embedded` maps GLB image indices to already-uploaded GL textures.
-    /// When the material's `$tex.file` property is `"*N"`, we look up index N.
+    /// Build a full Material from Assimp properties and embedded textures.
     fn process_material(ai_material: &AiMaterial) -> Material {
         let mut mat = Material::default();
+
+        // ── Scalar properties ─────────────────────────────────────────────
         for prop in &ai_material.properties {
-            log::debug!(
-                "[MatProp] key='{}' data={}",
-                prop.key,
-                match &prop.data {
-                    russimp_ng::material::PropertyTypeInfo::FloatArray(v) =>
-                        format!("Float{:?}", &v[..v.len().min(4)]),
-                    russimp_ng::material::PropertyTypeInfo::String(s) => format!("String({:?})", s),
-                    russimp_ng::material::PropertyTypeInfo::IntegerArray(v) =>
-                        format!("Int{:?}", &v[..v.len().min(4)]),
-                    _ => "Buffer/Other".to_string(),
-                }
-            );
             match prop.key.as_str() {
-                "$clr.diffuse" => {
-                    if let russimp_ng::material::PropertyTypeInfo::FloatArray(v) = &prop.data {
+                "$clr.diffuse" | "$clr.base" => {
+                    if let PropertyTypeInfo::FloatArray(v) = &prop.data {
                         if v.len() >= 3 {
-                            mat.diffuse_color = Vector4::new(v[0], v[1], v[2], 1.0);
+                            let a = if v.len() >= 4 { v[3] } else { 1.0 };
+                            mat.diffuse_color = Vector4::new(v[0], v[1], v[2], a);
                         }
                     }
                 }
                 "$clr.specular" => {
-                    if let russimp_ng::material::PropertyTypeInfo::FloatArray(v) = &prop.data {
+                    if let PropertyTypeInfo::FloatArray(v) = &prop.data {
                         if v.len() >= 3 {
                             mat.specular_color = Vector4::new(v[0], v[1], v[2], 1.0);
                         }
                     }
                 }
+                "$clr.ambient" => {
+                    if let PropertyTypeInfo::FloatArray(v) = &prop.data {
+                        if v.len() >= 3 {
+                            mat.ambient_color = Vector4::new(v[0], v[1], v[2], 1.0);
+                        }
+                    }
+                }
                 "$clr.emissive" => {
-                    if let russimp_ng::material::PropertyTypeInfo::FloatArray(v) = &prop.data {
+                    if let PropertyTypeInfo::FloatArray(v) = &prop.data {
                         if v.len() >= 3 {
                             mat.emissive_color = Vector4::new(v[0], v[1], v[2], 1.0);
                         }
                     }
                 }
-                "$mat.opacity" => {
-                    if let russimp_ng::material::PropertyTypeInfo::FloatArray(v) = &prop.data {
+                // glTF PBR metallic/roughness factors
+                "$mat.gltf.pbrMetallicRoughness.metallicFactor" => {
+                    if let PropertyTypeInfo::FloatArray(v) = &prop.data {
                         if !v.is_empty() {
-                            // TODO: store opacity somewhere in Material
-                            log::debug!("[TODO] material opacity={}", v[0]);
+                            mat.metallic_factor = v[0];
+                        }
+                    }
+                }
+                "$mat.gltf.pbrMetallicRoughness.roughnessFactor" => {
+                    if let PropertyTypeInfo::FloatArray(v) = &prop.data {
+                        if !v.is_empty() {
+                            mat.roughness_factor = v[0];
+                        }
+                    }
+                }
+                // KHR_materials_emissive_strength
+                "$mat.gltf.emissiveStrength" => {
+                    if let PropertyTypeInfo::FloatArray(v) = &prop.data {
+                        if !v.is_empty() {
+                            mat.emissive_strength = v[0];
+                        }
+                    }
+                }
+                "$mat.opacity" => {
+                    if let PropertyTypeInfo::FloatArray(v) = &prop.data {
+                        if !v.is_empty() {
+                            mat.diffuse_color.w = v[0];
                         }
                     }
                 }
                 "$mat.gltf.alphaMode" => {
-                    if let russimp_ng::material::PropertyTypeInfo::String(s) = &prop.data {
-                        // TODO: store alpha_mode in Material
-                        log::debug!("[TODO] material alpha_mode={}", s);
+                    if let PropertyTypeInfo::String(s) = &prop.data {
+                        mat.alpha_mode = match s.as_str() {
+                            "MASK" => AlphaMode::Mask(0.5),
+                            "BLEND" => AlphaMode::Blend,
+                            _ => AlphaMode::Opaque,
+                        };
                     }
                 }
                 "$mat.gltf.alphaCutoff" => {
-                    if let russimp_ng::material::PropertyTypeInfo::FloatArray(v) = &prop.data {
+                    if let PropertyTypeInfo::FloatArray(v) = &prop.data {
                         if !v.is_empty() {
-                            // TODO: store alpha_cutoff in Material
-                            log::debug!("[TODO] material alpha_cutoff={}", v[0]);
+                            mat.alpha_mode = AlphaMode::Mask(v[0]);
                         }
                     }
                 }
-                _ => {}
+                "$mat.twosided" => {
+                    if let PropertyTypeInfo::IntegerArray(v) = &prop.data {
+                        if !v.is_empty() {
+                            mat.cull_backface = v[0] == 0;
+                        }
+                    }
+                }
+                _ => {
+                    log::trace!("[MatProp] key='{}' (unhandled)", prop.key);
+                }
             }
         }
 
-        // ── TEXTURES (NEW, CLEAN WAY) ──
+        // ── Texture maps ──────────────────────────────────────────────────
+        // Priority: glTF PBR types first, then legacy Phong fallbacks.
 
-        // Diffuse / BaseColor
-        if let Some(tex) = ai_material
-            .textures
-            .get(&TextureType::BaseColor)
-            .or_else(|| ai_material.textures.get(&TextureType::Diffuse))
-        {
-            let tex = tex.borrow();
-            if let Some(gl_tex) = Self::convert_texture(&tex) {
-                mat.diffuse_texture = Some(gl_tex);
-            }
-        }
+        // Albedo / base color
+        mat.diffuse_texture = Self::load_tex(ai_material, TextureType::BaseColor)
+            .or_else(|| Self::load_tex(ai_material, TextureType::Diffuse));
 
         // Normal map
-        if let Some(tex) = ai_material.textures.get(&TextureType::Normals) {
-            let tex = tex.borrow();
-            if let Some(gl_tex) = Self::convert_texture(&tex) {
-                mat.normal_texture = Some(gl_tex);
-            }
+        mat.normal_texture = Self::load_tex(ai_material, TextureType::Normals)
+            .or_else(|| Self::load_tex(ai_material, TextureType::Height));
+
+        // Metallic-roughness ORM (glTF packs them into one texture)
+        mat.metallic_roughness_texture =
+            Self::load_tex(ai_material, TextureType::Unknown) // russimp maps ORM to Unknown
+                .or_else(|| Self::load_tex(ai_material, TextureType::Metalness))
+                .or_else(|| Self::load_tex(ai_material, TextureType::Roughness));
+
+        // Emissive
+        mat.emissive_texture = Self::load_tex(ai_material, TextureType::Emissive);
+
+        // Ambient occlusion (separate from ORM, when present)
+        mat.occlusion_texture = Self::load_tex(ai_material, TextureType::LightMap)
+            .or_else(|| Self::load_tex(ai_material, TextureType::AmbientOcclusion));
+
+        // Specular (legacy)
+        mat.specular_texture = Self::load_tex(ai_material, TextureType::Specular)
+            .or_else(|| Self::load_tex(ai_material, TextureType::Shininess));
+
+        // Log all texture types actually present for debugging
+        for (ty, _) in &ai_material.textures {
+            log::debug!("[Material] texture type present: {:?}", ty);
         }
 
-        // Specular
-        // if let Some(tex) = ai_material.textures.get(&TextureType::Specular) {
-        //     let tex = tex.borrow();
-        //     if let Some(gl_tex) = convert_texture(&tex) {
-        //         mat.specular_texture = Some(gl_tex);
-        //     }
-        // }
-
         mat
+    }
+
+    /// Try to load a texture of a given type from this material.
+    fn load_tex(mat: &AiMaterial, ty: TextureType) -> Option<Rc<dyn Texture>> {
+        let tex_ref = mat.textures.get(&ty)?;
+        let tex = tex_ref.borrow();
+        let result = Self::convert_texture(&tex);
+        if result.is_none() {
+            log::warn!("[ModelLoader] failed to convert {:?} texture", ty);
+        }
+        result
     }
 }

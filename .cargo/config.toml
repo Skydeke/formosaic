@@ -1,5 +1,8 @@
 # ─── Cargo configuration for Formosaic ───────────────────────────────────────
 #
+# Icons (source PNGs live in assets/icons/; requires ImageMagick):
+#   cargo generate-icons       Regenerate game/assets/res/mipmap-* from source PNGs
+#
 # Desktop:
 #   cargo desktop              Build + run debug
 #   cargo desktop-release      Build + run release
@@ -18,6 +21,9 @@
 #   cargo clean-all            Remove all build artefacts
 
 [alias]
+# Icon generation — uses xtask + ImageMagick; source PNGs live in assets/icons/
+generate-icons          = "run -p xtask -- generate-icons"
+
 # Desktop — run directly, no env gymnastics needed
 desktop                 = "run   -p formosaic --example desktop"
 desktop-release         = "run   -p formosaic --example desktop --release"

@@ -9,3 +9,5 @@ release.keystore
 -e 
 # Local secrets — never commit
 .env
+
+**/res/mipmap*
