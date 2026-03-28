@@ -201,12 +201,14 @@ fn cargo_apk(workspace: &Path, apk_args: &[&str]) {
 }
 
 fn android_run(workspace: &Path, release: bool) {
+    generate_icons(workspace);
     let mut args = vec!["run", "-p", "formosaic", "--example", "android"];
     if release { args.push("--release"); }
     cargo_apk(workspace, &args);
 }
 
 fn android_build(workspace: &Path, release: bool) {
+    generate_icons(workspace);
     let mut args = vec!["build", "-p", "formosaic", "--example", "android"];
     if release { args.push("--release"); }
     cargo_apk(workspace, &args);
