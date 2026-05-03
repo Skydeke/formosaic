@@ -4,10 +4,10 @@ use crate::architecture::models::material::Material;
 use crate::architecture::models::model::Model;
 use crate::architecture::scene::entity::scene_object::SceneObject;
 use crate::architecture::scene::scene_context::SceneContext;
-use crate::rendering::abstracted::irenderer::IRenderer;
 use crate::opengl::shaders::uniform::{UniformBoolean, UniformTexture};
 use crate::opengl::shaders::UniformVec3;
 use crate::opengl::shaders::{uniform::UniformAdapter, RenderState, ShaderProgram, UniformMatrix4};
+use crate::rendering::abstracted::irenderer::IRenderer;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -23,7 +23,10 @@ impl<T: SceneObject + 'static> EntityRenderer<T> {
         Self::with_shaders(DEFAULT_VERT, DEFAULT_FRAG)
     }
 
-    pub fn with_shaders(vertex_src: &str, fragment_src: &str) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn with_shaders(
+        vertex_src: &str,
+        fragment_src: &str,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
         log::info!("Initializing EntityRenderer");
         let mut shader_program = ShaderProgram::<T>::from_sources(vertex_src, fragment_src)?;
 
@@ -44,7 +47,8 @@ impl<T: SceneObject + 'static> EntityRenderer<T> {
         shader_program.add_per_instance_uniform(Rc::new(RefCell::new(UniformAdapter {
             uniform: UniformTexture::new("albedoTex", 0),
             extractor: Box::new(|state: &RenderState<T>| {
-                state.mesh_material()
+                state
+                    .mesh_material()
                     .and_then(|mat| mat.diffuse_texture.clone())
             }),
         })));
@@ -52,16 +56,26 @@ impl<T: SceneObject + 'static> EntityRenderer<T> {
         shader_program.add_per_instance_uniform(Rc::new(RefCell::new(UniformAdapter {
             uniform: UniformVec3::new("albedoConst"),
             extractor: Box::new(|state: &RenderState<T>| {
-                state.mesh_material()
+                state
+                    .mesh_material()
                     .map(|mat| mat.diffuse_color.truncate())
                     .unwrap_or(Vector3::new(1.0, 1.0, 1.0))
             }),
         })));
 
         shader_program.add_per_instance_uniform(Rc::new(RefCell::new(UniformAdapter {
+            uniform: UniformVec3::new("uCameraPos"),
+            extractor: Box::new(|state: &RenderState<T>| {
+                state
+                    .camera().transform.position
+            }),
+        })));
+
+        shader_program.add_per_instance_uniform(Rc::new(RefCell::new(UniformAdapter {
             uniform: UniformBoolean::new("isAlbedoMapped"),
             extractor: Box::new(|state: &RenderState<T>| {
-                state.mesh_material()
+                state
+                    .mesh_material()
                     .and_then(|mat| mat.diffuse_texture.as_ref())
                     .is_some()
             }),
@@ -69,9 +83,7 @@ impl<T: SceneObject + 'static> EntityRenderer<T> {
 
         shader_program.add_per_instance_uniform(Rc::new(RefCell::new(UniformAdapter {
             uniform: UniformBoolean::new("uHasVertexColors"),
-            extractor: Box::new(|state: &RenderState<T>| {
-                state.has_vertex_colors()
-            }),
+            extractor: Box::new(|state: &RenderState<T>| state.has_vertex_colors()),
         })));
 
         log::info!("EntityRenderer initialized successfully");
@@ -86,7 +98,9 @@ impl<T: SceneObject + 'static> IRenderer for EntityRenderer<T> {
         if let Some(scene) = context.scene() {
             let entity_nodes = scene.collect_nodes_of_type::<T>();
 
-            unsafe { gl::Disable(gl::CULL_FACE); }
+            unsafe {
+                gl::Disable(gl::CULL_FACE);
+            }
 
             for node in &entity_nodes {
                 let node_ref = node.borrow();
@@ -112,6 +126,9 @@ impl<T: SceneObject + 'static> IRenderer for EntityRenderer<T> {
                     let mut model_ref = model.borrow_mut();
 
                     for i in 0..mesh_count {
+                        let material = materials[i].as_ref();
+                        self.prepare_material(material);
+
                         let render_state = RenderState::new_preresolved(
                             self,
                             entity,
@@ -120,7 +137,8 @@ impl<T: SceneObject + 'static> IRenderer for EntityRenderer<T> {
                             materials[i].clone(),
                             vert_colors[i],
                         );
-                        self.shader_program.update_per_instance_uniforms(&render_state);
+                        self.shader_program
+                            .update_per_instance_uniforms(&render_state);
                         model_ref.bind_and_configure(i);
                         model_ref.render(&render_state, i);
                         model_ref.unbind(i);
@@ -130,11 +148,15 @@ impl<T: SceneObject + 'static> IRenderer for EntityRenderer<T> {
                 }
             }
 
-            unsafe { gl::Enable(gl::CULL_FACE); }
+            unsafe {
+                gl::Enable(gl::CULL_FACE);
+            }
         }
     }
 
-    fn any_processed(&self) -> bool { true }
+    fn any_processed(&self) -> bool {
+        true
+    }
     fn finish(&mut self) {}
 }
 

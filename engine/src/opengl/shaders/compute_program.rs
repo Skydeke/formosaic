@@ -1,6 +1,8 @@
-use crate::rendering::abstracted::processable::Processable;
+use cgmath::Vector2;
+
 use crate::opengl::shaders::uniform::Uniform;
 use crate::opengl::shaders::RenderState;
+use crate::rendering::abstracted::processable::Processable;
 use std::cell::RefCell;
 use std::ffi::CString;
 use std::rc::Rc;
@@ -79,8 +81,13 @@ impl<T: Processable> ComputeProgram<T> {
         unsafe { gl::UseProgram(0) };
     }
 
-    pub fn dispatch(&self, x: u32, y: u32, z: u32) {
-        unsafe { gl::DispatchCompute(x, y, z) };
+    pub fn dispatch(&self, group_x: u32, group_y: u32, resolution: Vector2<u32>) {
+        let dispatch_x = resolution.x.div_ceil(group_x);
+        let dispatch_y = resolution.y.div_ceil(group_y);
+
+        unsafe {
+            gl::DispatchCompute(dispatch_x, dispatch_y, 1);
+        }
     }
 
     pub fn memory_barrier(&self, flags: u32) {

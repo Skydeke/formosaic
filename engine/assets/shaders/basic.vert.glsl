@@ -6,9 +6,9 @@ layout (location = 1) in vec2 uv;
 layout (location = 2) in vec3 norm;
 layout (location = 5) in vec4 vertColor;
 
+out vec3 v_pos;
 out vec2 v_uv;
 flat out vec3 v_normal;
-out vec3 v_pos;
 out vec4 v_color;
 
 uniform mat4 uVP;

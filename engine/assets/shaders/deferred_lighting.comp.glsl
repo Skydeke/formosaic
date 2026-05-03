@@ -56,14 +56,14 @@ void main() {
     // upFacing: 1.0 = fully up, 0.0 = fully down
     float upFacing    = dot(N, vec3(0.0, 1.0, 0.0)) * 0.5 + 0.5;
     vec3  skyAmbient  = uSkyColor * 0.22 * upFacing;
-    vec3  groundColor = vec3(0.20, 0.15, 0.10);  // subtle warm bounce
-    vec3  gndAmbient  = groundColor * uAmbientMin * (1.0 - upFacing);
+    vec3 groundColor = vec3(0.25, 0.20, 0.15); // was 0.20, 0.15, 0.10
+    vec3 gndAmbient  = groundColor * 0.3 * (1.0 - upFacing); // was uAmbientMin
     vec3  ambient     = skyAmbient + gndAmbient + vec3(uAmbientMin * 0.38);
 
     // ── Key (sun) light — wrap lighting for soft low-poly shading ────────
     float wrap    = 0.3;
     float nDotL   = (dot(N, sunDir) + wrap) / (1.0 + wrap);
-    float diffuse = max(nDotL, 0.0);
+    float diffuse = max(nDotL, 0.15);
     // Sharpen the falloff so lit/shadow boundary pops on flat faces
     diffuse       = diffuse * diffuse * (3.0 - 2.0 * diffuse); // smoothstep
     vec3  sun     = uSunColor * diffuse;
@@ -91,5 +91,5 @@ void main() {
     // sRGB gamma encode
     colour         = pow(max(colour, vec3(0.0)), vec3(1.0 / 2.2));
 
-    imageStore(gOutput, coord, vec4(colour, 1.0));
+    imageStore(gOutput, coord, vec4(colour, albedoData.a));
 }

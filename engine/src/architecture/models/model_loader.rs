@@ -33,7 +33,9 @@ impl ModelLoader {
             bytes,
             vec![
                 PostProcess::Triangulate,
-                PostProcess::GenerateNormals,
+                PostProcess::GenerateSmoothNormals,
+                PostProcess::ForceGenerateNormals,
+                PostProcess::JoinIdenticalVertices,
                 PostProcess::ImproveCacheLocality,
                 PostProcess::PreTransformVertices,
                 PostProcess::EmbedTextures,
@@ -42,6 +44,22 @@ impl ModelLoader {
             hint,
         )
         .unwrap_or_else(|e| panic!("Failed to parse model '{}': {:?}", cache_key, e));
+
+        // Ensure the model has proper UV coordinates and normals
+        let scene = &scene;
+        for mesh in &scene.meshes {
+            if mesh.vertices.is_empty() {
+                log::warn!("[ModelLoader] mesh has no vertices");
+            }
+            if mesh.normals.is_empty() {
+                log::warn!("[ModelLoader] mesh has no normals - lighting will be incorrect");
+            }
+            if mesh.texture_coords.is_empty() {
+                log::warn!(
+                    "[ModelLoader] mesh has no texture coordinates - texture mapping will not work"
+                );
+            }
+        }
 
         let mut sum = Vector3::new(0.0f32, 0.0, 0.0);
         let mut count = 0usize;
@@ -91,12 +109,20 @@ impl ModelLoader {
 
     // ── Texture conversion ────────────────────────────────────────────────────
 
-    fn convert_texture(tex: &russimp_ng::material::Texture) -> Option<Rc<dyn Texture>> {
+    fn convert_texture(
+        tex: &russimp_ng::material::Texture,
+    ) -> Option<Rc<dyn Texture>> {
+        use image::ImageFormat;
+        use std::io::Cursor;
+
         match &tex.data {
             russimp_ng::material::DataContent::Bytes(bytes) => {
+                // Assimp:
+                // height > 0 => raw pixel data
+                // height == 0 => compressed embedded image
                 if tex.height > 0 {
-                    // Raw (uncompressed) pixel data
                     let expected = (tex.width * tex.height * 4) as usize;
+
                     if bytes.len() != expected {
                         log::error!(
                             "[Texture] Raw size mismatch: got={}, expected={}",
@@ -105,37 +131,67 @@ impl ModelLoader {
                         );
                         return None;
                     }
-                    return Some(Rc::new(Self::upload_rgba_texture(
-                        tex.width, tex.height, bytes,
-                    )));
+
+                    return Some(Rc::new(
+                        Self::upload_rgba_texture(
+                            tex.width,
+                            tex.height,
+                            bytes,
+                        )
+                    ));
                 }
 
-                // Compressed (PNG / JPEG / …) — decode with the `image` crate
-                use image::io::Reader as ImageReader;
-                use std::io::Cursor;
+                // Compressed embedded image
+                let format_hint = tex
+                    .ach_format_hint
+                    .trim_matches(char::from(0))
+                    .to_ascii_lowercase();
 
-                let img = ImageReader::new(Cursor::new(bytes))
-                    .with_guessed_format()
-                    .ok()?
-                    .decode()
-                    .ok()?
-                    .into_rgba8();
+                log::debug!(
+                    "[Texture] embedded format hint: '{}'",
+                    format_hint
+                );
 
-                let (w, h) = (img.width(), img.height());
-                Some(Rc::new(Self::upload_rgba_texture(w, h, &img.into_raw())))
+                let cursor = Cursor::new(bytes);
+
+                let decoded = match format_hint.as_str() {
+                    "png" => image::load(cursor, ImageFormat::Png).ok()?,
+                    "jpg" | "jpeg" => image::load(cursor, ImageFormat::Jpeg).ok()?,
+                    "bmp" => image::load(cursor, ImageFormat::Bmp).ok()?,
+                    "tga" => image::load(cursor, ImageFormat::Tga).ok()?,
+
+                    // fallback
+                    _ => image::load_from_memory(bytes).ok()?,
+                };
+
+                let img = decoded.into_rgba8();
+
+                Some(Rc::new(
+                    Self::upload_rgba_texture(
+                        img.width(),
+                        img.height(),
+                        &img.into_raw(),
+                    )
+                ))
             }
 
             russimp_ng::material::DataContent::Texel(texels) => {
                 let mut rgba = Vec::with_capacity(texels.len() * 4);
+
                 for t in texels {
                     rgba.push(t.r);
                     rgba.push(t.g);
                     rgba.push(t.b);
                     rgba.push(t.a);
                 }
-                Some(Rc::new(Self::upload_rgba_texture(
-                    tex.width, tex.height, &rgba,
-                )))
+
+                Some(Rc::new(
+                    Self::upload_rgba_texture(
+                        tex.width,
+                        tex.height,
+                        &rgba,
+                    )
+                ))
             }
         }
     }

@@ -128,6 +128,9 @@ impl Material {
     /// Configure GL state before rendering this material.
     pub fn preconfigure(&self) {
         unsafe {
+            // Always enable depth testing for proper 3D rendering
+            unsafe { gl::Enable(gl::DEPTH_TEST); }
+            
             if self.cull_backface {
                 gl::Enable(gl::CULL_FACE);
             } else {
