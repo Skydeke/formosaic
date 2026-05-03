@@ -63,31 +63,31 @@ impl HintRenderer {
 
         {
             let f = Rc::clone(&frame);
-            shader.add_per_render_uniform(Rc::new(RefCell::new(UniformAdapter {
+            shader.add_per_render_uniform(Box::new(UniformAdapter {
                 uniform: UniformVec3::new("uWarmthColor"),
                 extractor: Box::new(move |_: &RenderState<NoopProcessable>| f.borrow().warmth_color),
-            })));
+            }));
         }
         {
             let f = Rc::clone(&frame);
-            shader.add_per_render_uniform(Rc::new(RefCell::new(UniformAdapter {
+            shader.add_per_render_uniform(Box::new(UniformAdapter {
                 uniform: UniformFloat::new("uWarmth"),
                 extractor: Box::new(move |_: &RenderState<NoopProcessable>| f.borrow().warmth),
-            })));
+            }));
         }
         {
             let f = Rc::clone(&frame);
-            shader.add_per_render_uniform(Rc::new(RefCell::new(UniformAdapter {
+            shader.add_per_render_uniform(Box::new(UniformAdapter {
                 uniform: UniformFloat::new("uHintTier"),
                 extractor: Box::new(move |_: &RenderState<NoopProcessable>| f.borrow().hint_tier),
-            })));
+            }));
         }
         {
             let f = Rc::clone(&frame);
-            shader.add_per_render_uniform(Rc::new(RefCell::new(UniformAdapter {
+            shader.add_per_render_uniform(Box::new(UniformAdapter {
                 uniform: UniformFloat::new("uTime"),
                 extractor: Box::new(move |_: &RenderState<NoopProcessable>| f.borrow().time),
-            })));
+            }));
         }
 
         Ok(Self { vao, shader, frame })

@@ -67,36 +67,36 @@ impl ShineRenderer {
         // uTime — drives the sweep animation.
         {
             let f = Rc::clone(&frame);
-            shader.add_per_render_uniform(Rc::new(RefCell::new(UniformAdapter {
+            shader.add_per_render_uniform(Box::new(UniformAdapter {
                 uniform: UniformFloat::new("uTime"),
                 extractor: Box::new(move |_: &RenderState<NoopProcessable>| {
                     f.borrow().solved_timer
                 }),
-            })));
+            }));
         }
         // uPosition — world-space position G-buffer, sampler on unit 0.
         {
             let f = Rc::clone(&frame);
-            shader.add_per_render_uniform(Rc::new(RefCell::new(UniformAdapter {
+            shader.add_per_render_uniform(Box::new(UniformAdapter {
                 uniform: UniformTexture::new("uPosition", 0),
                 extractor: Box::new(move |_: &RenderState<NoopProcessable>| {
                     let id = f.borrow().position_tex_id;
                     if id == 0 { None }
                     else { Some(Rc::new(SimpleTexture::new(id)) as Rc<dyn Texture>) }
                 }),
-            })));
+            }));
         }
         // uAlbedo — albedo G-buffer (alpha channel = model mask), sampler on unit 1.
         {
             let f = Rc::clone(&frame);
-            shader.add_per_render_uniform(Rc::new(RefCell::new(UniformAdapter {
+            shader.add_per_render_uniform(Box::new(UniformAdapter {
                 uniform: UniformTexture::new("uAlbedo", 1),
                 extractor: Box::new(move |_: &RenderState<NoopProcessable>| {
                     let id = f.borrow().albedo_tex_id;
                     if id == 0 { None }
                     else { Some(Rc::new(SimpleTexture::new(id)) as Rc<dyn Texture>) }
                 }),
-            })));
+            }));
         }
 
         log::info!("ShineRenderer initialised");

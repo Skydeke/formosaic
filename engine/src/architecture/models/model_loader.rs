@@ -18,7 +18,6 @@ use crate::architecture::models::material::{AlphaMode, Material};
 use crate::architecture::models::mesh::Mesh;
 use crate::architecture::models::model_cache::ModelCache;
 use crate::architecture::models::simple_model::SimpleModel;
-use crate::architecture::scene::node::transform::Transform;
 use crate::opengl::constants::render_mode::RenderMode;
 use crate::opengl::fbos::simple_texture::SimpleTexture;
 use crate::opengl::textures::texture::Texture;
@@ -65,7 +64,7 @@ impl ModelLoader {
 
         let materials: Vec<Material> = scene.materials.iter().map(Self::process_material).collect();
 
-        let mut mesh_transforms: Vec<Option<Transform>> = vec![None; scene.meshes.len()];
+        let mut mesh_transforms: Vec<Option<Matrix4<f32>>> = vec![None; scene.meshes.len()];
         if let Some(root) = &scene.root {
             Self::collect_node_transforms(root, Matrix4::from_scale(1.0), &mut mesh_transforms);
         }
@@ -95,7 +94,7 @@ impl ModelLoader {
 
         let mesh_transforms = mesh_transforms
             .into_iter()
-            .map(|m| m.unwrap_or_else(Transform::new))
+            .map(|m| m.unwrap_or_else(|| Matrix4::from_scale(1.0)))
             .collect();
 
         let model = Rc::new(RefCell::new(SimpleModel::with_mesh_transforms(
@@ -297,17 +296,16 @@ impl ModelLoader {
     fn collect_node_transforms(
         node: &Rc<AiNode>,
         parent_transform: Matrix4<f32>,
-        mesh_transforms: &mut [Option<Transform>],
+        mesh_transforms: &mut [Option<Matrix4<f32>>],
     ) {
         let local = Self::ai_matrix_to_cg(&node.transformation);
         let world = parent_transform * local;
-        let world_transform = Transform::from_matrix(world);
 
         for mesh_idx in &node.meshes {
             let idx = *mesh_idx as usize;
             if let Some(slot) = mesh_transforms.get_mut(idx) {
                 if slot.is_none() {
-                    *slot = Some(world_transform.clone());
+                    *slot = Some(world);
                 }
             }
         }

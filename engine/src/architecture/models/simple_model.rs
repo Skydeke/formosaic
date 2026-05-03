@@ -2,11 +2,10 @@ use cgmath::{Matrix4, Vector3, Vector4};
 
 use crate::architecture::models::mesh::Mesh;
 use crate::architecture::models::model::Model;
-use crate::architecture::scene::node::transform::Transform;
-use crate::rendering::abstracted::processable::Processable;
-use crate::rendering::abstracted::renderable::Renderable;
 use crate::opengl::constants::render_mode::RenderMode;
 use crate::opengl::shaders::RenderState;
+use crate::rendering::abstracted::processable::Processable;
+use crate::rendering::abstracted::renderable::Renderable;
 
 /// Puzzle setup parameters derived from model geometry analysis.
 #[derive(Debug, Clone, Copy)]
@@ -39,7 +38,7 @@ pub struct SimpleModel {
     meshes: Vec<Mesh>,
     render_mode: RenderMode,
     centroid: Option<Vector3<f32>>,
-    mesh_transforms: Vec<Transform>,
+    mesh_transforms: Vec<Matrix4<f32>>,
 }
 
 impl SimpleModel {
@@ -60,7 +59,7 @@ impl SimpleModel {
             meshes,
             render_mode,
             centroid: Some(centroid),
-            mesh_transforms: vec![Transform::new(); mesh_count],
+            mesh_transforms: vec![Matrix4::from_scale(1.0); mesh_count],
         }
     }
 
@@ -73,7 +72,7 @@ impl SimpleModel {
             meshes,
             render_mode,
             centroid: None,
-            mesh_transforms: vec![Transform::new(); mesh_count],
+            mesh_transforms: vec![Matrix4::from_scale(1.0); mesh_count],
         }
     }
 
@@ -81,7 +80,7 @@ impl SimpleModel {
         meshes: Vec<Mesh>,
         render_mode: RenderMode,
         centroid: Option<Vector3<f32>>,
-        mesh_transforms: Vec<Transform>,
+        mesh_transforms: Vec<Matrix4<f32>>,
     ) -> Self {
         if meshes.is_empty() {
             panic!("SimpleModel must have at least one mesh");
@@ -122,7 +121,7 @@ impl SimpleModel {
             let mesh_transform = self
                 .mesh_transforms
                 .get(mesh_idx)
-                .map(|t| t.get_matrix())
+                .copied()
                 .unwrap_or_else(|| Matrix4::from_scale(1.0));
             let pos = mesh.positions();
             let mut i = 0;
@@ -191,8 +190,9 @@ impl SimpleModel {
             let mesh_transform = self
                 .mesh_transforms
                 .get(mesh_idx)
-                .map(|t| t.get_matrix())
+                .cloned()
                 .unwrap_or_else(|| cgmath::Matrix4::from_scale(1.0));
+
             mesh.scramble_along_axis(axis, min_disp, max_disp, mesh_transform);
         }
     }
@@ -241,7 +241,7 @@ impl Model for SimpleModel {
             let mesh_transform = self
                 .mesh_transforms
                 .get(mesh_idx)
-                .map(|t| t.get_matrix())
+                .copied()
                 .unwrap_or_else(|| Matrix4::from_scale(1.0));
             let pos = mesh.positions();
             let mut i = 0;
@@ -262,7 +262,7 @@ impl Model for SimpleModel {
         self.centroid
     }
 
-    fn mesh_transform(&self, mesh_idx: usize) -> Option<Transform> {
-        self.mesh_transforms.get(mesh_idx).cloned()
+    fn mesh_transform(&self, mesh_idx: usize) -> Option<Matrix4<f32>> {
+        self.mesh_transforms.get(mesh_idx).copied()
     }
 }

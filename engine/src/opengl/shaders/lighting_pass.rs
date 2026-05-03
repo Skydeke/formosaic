@@ -51,57 +51,57 @@ impl LightingPass {
 
         // Register every lighting uniform through the standard adapter system.
         {
-            let l = Rc::clone(&lights);
-            program.add_uniform(Rc::new(RefCell::new(UniformAdapter {
+            let l: Rc<RefCell<LightConfig>> = Rc::clone(&lights);
+            program.add_uniform(Box::new(UniformAdapter {
                 uniform: UniformVec3::new("uClearColor"),
                 extractor: Box::new(move |_: &RenderState<CameraOnly>| {
                     let c = l.borrow().clear_color;
                     Vector3::new(c[0], c[1], c[2])
                 }),
-            })));
+            }));
         }
         {
-            let l = Rc::clone(&lights);
-            program.add_uniform(Rc::new(RefCell::new(UniformAdapter {
+            let l: Rc<RefCell<LightConfig>> = Rc::clone(&lights);
+            program.add_uniform(Box::new(UniformAdapter {
                 uniform: UniformVec3::new("uSunDir"),
                 extractor: Box::new(move |_: &RenderState<CameraOnly>| {
                     let d = l.borrow().sun_dir;
                     Vector3::new(d[0], d[1], d[2])
                 }),
-            })));
+            }));
         }
         {
-            let l = Rc::clone(&lights);
-            program.add_uniform(Rc::new(RefCell::new(UniformAdapter {
+            let l: Rc<RefCell<LightConfig>> = Rc::clone(&lights);
+            program.add_uniform(Box::new(UniformAdapter {
                 uniform: UniformVec3::new("uSunColor"),
                 extractor: Box::new(move |_: &RenderState<CameraOnly>| {
                     let c = l.borrow().sun_color;
                     Vector3::new(c[0], c[1], c[2])
                 }),
-            })));
+            }));
         }
         {
-            let l = Rc::clone(&lights);
-            program.add_uniform(Rc::new(RefCell::new(UniformAdapter {
+            let l: Rc<RefCell<LightConfig>> = Rc::clone(&lights);
+            program.add_uniform(Box::new(UniformAdapter {
                 uniform: UniformVec3::new("uSkyColor"),
                 extractor: Box::new(move |_: &RenderState<CameraOnly>| {
                     let c = l.borrow().sky_color;
                     Vector3::new(c[0], c[1], c[2])
                 }),
-            })));
+            }));
         }
         {
-            let l = Rc::clone(&lights);
-            program.add_uniform(Rc::new(RefCell::new(UniformAdapter {
+            let l: Rc<RefCell<LightConfig>> = Rc::clone(&lights);
+            program.add_uniform(Box::new(UniformAdapter {
                 uniform: UniformFloat::new("uAmbientMin"),
                 extractor: Box::new(move |_: &RenderState<CameraOnly>| l.borrow().ambient_min),
-            })));
+            }));
         }
         {
-            program.add_uniform(Rc::new(RefCell::new(UniformAdapter {
+            program.add_uniform(Box::new(UniformAdapter {
                 uniform: UniformVec3::new("uCameraPos"),
                 extractor: Box::new(|state: &RenderState<CameraOnly>| state.camera().transform.position),
-            })));
+            }));
         }
 
         Self { program, lights }

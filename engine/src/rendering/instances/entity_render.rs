@@ -8,8 +8,6 @@ use crate::opengl::shaders::uniform::{UniformBoolean, UniformFloat, UniformTextu
 use crate::opengl::shaders::UniformVec3;
 use crate::opengl::shaders::{uniform::UniformAdapter, RenderState, ShaderProgram, UniformMatrix4};
 use crate::rendering::abstracted::irenderer::IRenderer;
-use std::cell::RefCell;
-use std::rc::Rc;
 
 pub struct EntityRenderer<T: SceneObject> {
     shader_program: ShaderProgram<T>,
@@ -30,14 +28,14 @@ impl<T: SceneObject + 'static> EntityRenderer<T> {
         log::info!("Initializing EntityRenderer");
         let mut shader_program = ShaderProgram::<T>::from_sources(vertex_src, fragment_src)?;
 
-        shader_program.add_per_instance_uniform(Rc::new(RefCell::new(UniformAdapter {
+        shader_program.add_per_instance_uniform(Box::new(UniformAdapter {
             uniform: UniformMatrix4::new("uVP"),
             extractor: Box::new(|state: &RenderState<T>| {
                 *state.camera().get_projection_view_matrix()
             }),
-        })));
+        }));
 
-        shader_program.add_per_instance_uniform(Rc::new(RefCell::new(UniformAdapter {
+        shader_program.add_per_instance_uniform(Box::new(UniformAdapter {
             uniform: UniformMatrix4::new("uModel"),
             extractor: Box::new(|state: &RenderState<T>| {
                 let entity = state.instance().unwrap();
@@ -45,22 +43,21 @@ impl<T: SceneObject + 'static> EntityRenderer<T> {
                 let mesh_matrix = entity
                     .get_model()
                     .mesh_transform(state.instance_mesh_idx() as usize)
-                    .map(|t| t.get_matrix())
                     .unwrap_or_else(|| cgmath::Matrix4::from_scale(1.0));
                 entity_matrix * mesh_matrix
             }),
-        })));
+        }));
 
-        shader_program.add_per_instance_uniform(Rc::new(RefCell::new(UniformAdapter {
+        shader_program.add_per_instance_uniform(Box::new(UniformAdapter {
             uniform: UniformTexture::new("albedoTex", 0),
             extractor: Box::new(|state: &RenderState<T>| {
                 state
                     .mesh_material()
                     .and_then(|mat| mat.diffuse_texture.clone())
             }),
-        })));
+        }));
 
-        shader_program.add_per_instance_uniform(Rc::new(RefCell::new(UniformAdapter {
+        shader_program.add_per_instance_uniform(Box::new(UniformAdapter {
             uniform: UniformVec3::new("albedoConst"),
             extractor: Box::new(|state: &RenderState<T>| {
                 state
@@ -68,9 +65,9 @@ impl<T: SceneObject + 'static> EntityRenderer<T> {
                     .map(|mat| mat.diffuse_color.truncate())
                     .unwrap_or(Vector3::new(1.0, 1.0, 1.0))
             }),
-        })));
+        }));
 
-        shader_program.add_per_instance_uniform(Rc::new(RefCell::new(UniformAdapter {
+        shader_program.add_per_instance_uniform(Box::new(UniformAdapter {
             uniform: UniformFloat::new("uOpacity"),
             extractor: Box::new(|state: &RenderState<T>| {
                 state
@@ -78,9 +75,9 @@ impl<T: SceneObject + 'static> EntityRenderer<T> {
                     .map(|mat| mat.diffuse_color.w)
                     .unwrap_or(1.0)
             }),
-        })));
+        }));
 
-        shader_program.add_per_instance_uniform(Rc::new(RefCell::new(UniformAdapter {
+        shader_program.add_per_instance_uniform(Box::new(UniformAdapter {
             uniform: UniformFloat::new("uAlphaCutoff"),
             extractor: Box::new(|state: &RenderState<T>| {
                 match state.mesh_material().map(|mat| mat.alpha_mode) {
@@ -88,14 +85,14 @@ impl<T: SceneObject + 'static> EntityRenderer<T> {
                     _ => 0.01,
                 }
             }),
-        })));
+        }));
 
-        shader_program.add_per_instance_uniform(Rc::new(RefCell::new(UniformAdapter {
+        shader_program.add_per_instance_uniform(Box::new(UniformAdapter {
             uniform: UniformVec3::new("uCameraPos"),
             extractor: Box::new(|state: &RenderState<T>| state.camera().transform.position),
-        })));
+        }));
 
-        shader_program.add_per_instance_uniform(Rc::new(RefCell::new(UniformAdapter {
+        shader_program.add_per_instance_uniform(Box::new(UniformAdapter {
             uniform: UniformBoolean::new("isAlbedoMapped"),
             extractor: Box::new(|state: &RenderState<T>| {
                 state
@@ -103,14 +100,14 @@ impl<T: SceneObject + 'static> EntityRenderer<T> {
                     .and_then(|mat| mat.diffuse_texture.as_ref())
                     .is_some()
             }),
-        })));
+        }));
 
-        shader_program.add_per_instance_uniform(Rc::new(RefCell::new(UniformAdapter {
+        shader_program.add_per_instance_uniform(Box::new(UniformAdapter {
             uniform: UniformBoolean::new("uHasVertexColors"),
             extractor: Box::new(|state: &RenderState<T>| state.has_vertex_colors()),
-        })));
+        }));
 
-        shader_program.add_per_instance_uniform(Rc::new(RefCell::new(UniformAdapter {
+        shader_program.add_per_instance_uniform(Box::new(UniformAdapter {
             uniform: UniformFloat::new("uMetallicFactor"),
             extractor: Box::new(|state: &RenderState<T>| {
                 state
@@ -118,9 +115,9 @@ impl<T: SceneObject + 'static> EntityRenderer<T> {
                     .map(|mat| mat.metallic_factor)
                     .unwrap_or(0.0)
             }),
-        })));
+        }));
 
-        shader_program.add_per_instance_uniform(Rc::new(RefCell::new(UniformAdapter {
+        shader_program.add_per_instance_uniform(Box::new(UniformAdapter {
             uniform: UniformFloat::new("uRoughnessFactor"),
             extractor: Box::new(|state: &RenderState<T>| {
                 state
@@ -128,7 +125,7 @@ impl<T: SceneObject + 'static> EntityRenderer<T> {
                     .map(|mat| mat.roughness_factor)
                     .unwrap_or(0.5)
             }),
-        })));
+        }));
 
         log::info!("EntityRenderer initialized successfully");
         Ok(Self { shader_program })

@@ -1,9 +1,8 @@
-use cgmath::Vector3;
+use cgmath::{Matrix4, Vector3};
 
 use crate::rendering::abstracted::processable::Processable;
 use crate::{
     architecture::models::{material::Material, mesh::Mesh},
-    architecture::scene::node::transform::Transform,
     opengl::shaders::render_state::RenderState,
 };
 
@@ -17,7 +16,7 @@ pub trait Model {
     fn centroid(&self) -> Option<Vector3<f32>>;
 
     /// Per-mesh local transform, if the model preserves node transforms.
-    fn mesh_transform(&self, _mesh_idx: usize) -> Option<Transform> {
+    fn mesh_transform(&self, _mesh_idx: usize) -> Option<Matrix4<f32>> {
         None
     }
 

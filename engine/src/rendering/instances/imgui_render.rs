@@ -164,15 +164,15 @@ impl ImguiGlRenderer {
         let mut shader = ShaderProgram::<NoopProcessable>::from_sources(DEFAULT_VERT, DEFAULT_FRAG)?;
         {
             let f = Rc::clone(&frame);
-            shader.add_per_render_uniform(Rc::new(RefCell::new(UniformAdapter {
+            shader.add_per_render_uniform(Box::new(UniformAdapter {
                 uniform:   UniformMatrix4::new("uProjMtx"),
                 extractor: Box::new(move |_: &RenderState<NoopProcessable>| f.borrow().proj),
-            })));
+            }));
         }
-        shader.add_per_render_uniform(Rc::new(RefCell::new(UniformAdapter {
+        shader.add_per_render_uniform(Box::new(UniformAdapter {
             uniform:   UniformInt::new("uTexture"),
             extractor: Box::new(|_: &RenderState<NoopProcessable>| 0i32),
-        })));
+        }));
 
         let stride = mem::size_of::<DrawVert>() as i32;
         let vao = Vao::create();

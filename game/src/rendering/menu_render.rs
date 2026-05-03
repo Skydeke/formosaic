@@ -79,10 +79,10 @@ impl MenuRenderer {
         let mut shader = ShaderProgram::<NoopProcessable>::from_sources(vert_src, frag_src)?;
         {
             let f = Rc::clone(&frame);
-            shader.add_per_render_uniform(Rc::new(RefCell::new(UniformAdapter {
+            shader.add_per_render_uniform(Box::new(UniformAdapter {
                 uniform: UniformVec2::new("uRes"),
                 extractor: Box::new(move |_: &RenderState<NoopProcessable>| f.borrow().res),
-            })));
+            }));
         }
 
         let stride = (FLOATS_PER_VERT * std::mem::size_of::<f32>()) as i32;

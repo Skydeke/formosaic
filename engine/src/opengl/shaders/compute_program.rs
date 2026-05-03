@@ -3,13 +3,11 @@ use cgmath::Vector2;
 use crate::opengl::shaders::uniform::Uniform;
 use crate::opengl::shaders::RenderState;
 use crate::rendering::abstracted::processable::Processable;
-use std::cell::RefCell;
 use std::ffi::CString;
-use std::rc::Rc;
 
 pub struct ComputeProgram<T: Processable> {
     id: u32,
-    uniforms: Vec<Rc<RefCell<dyn for<'a> Uniform<RenderState<'a, T>>>>>,
+    uniforms: Vec<Box<dyn for<'a> Uniform<RenderState<'a, T>>>>,
 }
 
 impl<T: Processable> ComputeProgram<T> {
@@ -94,15 +92,15 @@ impl<T: Processable> ComputeProgram<T> {
         unsafe { gl::MemoryBarrier(flags) };
     }
 
-    pub fn add_uniform(&mut self, uniform: Rc<RefCell<dyn for<'a> Uniform<RenderState<'a, T>>>>) {
+    pub fn add_uniform(&mut self, mut uniform: Box<dyn for<'a> Uniform<RenderState<'a, T>>>) {
         self.bind();
-        uniform.borrow_mut().initialize(self.id);
+        uniform.initialize(self.id);
         self.uniforms.push(uniform);
     }
 
     pub fn update_uniforms<'a>(&self, state: &RenderState<'a, T>) {
         for uniform in &self.uniforms {
-            uniform.borrow().load(state);
+            uniform.load(state);
         }
     }
 

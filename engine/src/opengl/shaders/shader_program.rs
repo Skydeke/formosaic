@@ -1,14 +1,12 @@
 use crate::rendering::abstracted::processable::Processable;
 use crate::opengl::shaders::{shader::Shader, uniform::Uniform, RenderState};
-use std::cell::RefCell;
 use std::ffi::CString;
 use std::ptr;
-use std::rc::Rc;
 
 pub struct ShaderProgram<T: Processable> {
     id: u32,
-    per_render_uniforms: Vec<Rc<RefCell<dyn for<'a> Uniform<RenderState<'a, T>>>>>,
-    per_instance_uniforms: Vec<Rc<RefCell<dyn for<'a> Uniform<RenderState<'a, T>>>>>,
+    per_render_uniforms: Vec<Box<dyn for<'a> Uniform<RenderState<'a, T>>>>,
+    per_instance_uniforms: Vec<Box<dyn for<'a> Uniform<RenderState<'a, T>>>>,
 }
 
 impl<T: Processable> ShaderProgram<T> {
@@ -72,31 +70,31 @@ impl<T: Processable> ShaderProgram<T> {
 
     pub fn add_per_render_uniform(
         &mut self,
-        uniform: Rc<RefCell<dyn for<'a> Uniform<RenderState<'a, T>>>>,
+        mut uniform: Box<dyn for<'a> Uniform<RenderState<'a, T>>>,
     ) {
         self.bind();
-        uniform.borrow_mut().initialize(self.id);
+        uniform.initialize(self.id);
         self.per_render_uniforms.push(uniform);
     }
 
     pub fn add_per_instance_uniform(
         &mut self,
-        uniform: Rc<RefCell<dyn for<'a> Uniform<RenderState<'a, T>>>>,
+        mut uniform: Box<dyn for<'a> Uniform<RenderState<'a, T>>>,
     ) {
         self.bind();
-        uniform.borrow_mut().initialize(self.id);
+        uniform.initialize(self.id);
         self.per_instance_uniforms.push(uniform);
     }
 
     pub fn update_per_render_uniforms<'a>(&self, state: &RenderState<'a, T>) {
         for uniform in &self.per_render_uniforms {
-            uniform.borrow().load(state);
+            uniform.load(state);
         }
     }
 
     pub fn update_per_instance_uniforms<'a>(&self, state: &RenderState<'a, T>) {
         for uniform in &self.per_instance_uniforms {
-            uniform.borrow().load(state);
+            uniform.load(state);
         }
     }
 
