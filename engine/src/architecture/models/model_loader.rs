@@ -109,9 +109,7 @@ impl ModelLoader {
 
     // ── Texture conversion ────────────────────────────────────────────────────
 
-    fn convert_texture(
-        tex: &russimp_ng::material::Texture,
-    ) -> Option<Rc<dyn Texture>> {
+    fn convert_texture(tex: &russimp_ng::material::Texture) -> Option<Rc<dyn Texture>> {
         use image::ImageFormat;
         use std::io::Cursor;
 
@@ -132,13 +130,9 @@ impl ModelLoader {
                         return None;
                     }
 
-                    return Some(Rc::new(
-                        Self::upload_rgba_texture(
-                            tex.width,
-                            tex.height,
-                            bytes,
-                        )
-                    ));
+                    return Some(Rc::new(Self::upload_rgba_texture(
+                        tex.width, tex.height, bytes,
+                    )));
                 }
 
                 // Compressed embedded image
@@ -147,10 +141,7 @@ impl ModelLoader {
                     .trim_matches(char::from(0))
                     .to_ascii_lowercase();
 
-                log::debug!(
-                    "[Texture] embedded format hint: '{}'",
-                    format_hint
-                );
+                log::debug!("[Texture] embedded format hint: '{}'", format_hint);
 
                 let cursor = Cursor::new(bytes);
 
@@ -166,13 +157,11 @@ impl ModelLoader {
 
                 let img = decoded.into_rgba8();
 
-                Some(Rc::new(
-                    Self::upload_rgba_texture(
-                        img.width(),
-                        img.height(),
-                        &img.into_raw(),
-                    )
-                ))
+                Some(Rc::new(Self::upload_rgba_texture(
+                    img.width(),
+                    img.height(),
+                    &img.into_raw(),
+                )))
             }
 
             russimp_ng::material::DataContent::Texel(texels) => {
@@ -185,13 +174,9 @@ impl ModelLoader {
                     rgba.push(t.a);
                 }
 
-                Some(Rc::new(
-                    Self::upload_rgba_texture(
-                        tex.width,
-                        tex.height,
-                        &rgba,
-                    )
-                ))
+                Some(Rc::new(Self::upload_rgba_texture(
+                    tex.width, tex.height, &rgba,
+                )))
             }
         }
     }

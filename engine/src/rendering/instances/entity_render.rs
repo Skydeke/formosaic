@@ -4,7 +4,7 @@ use crate::architecture::models::material::Material;
 use crate::architecture::models::model::Model;
 use crate::architecture::scene::entity::scene_object::SceneObject;
 use crate::architecture::scene::scene_context::SceneContext;
-use crate::opengl::shaders::uniform::{UniformBoolean, UniformTexture};
+use crate::opengl::shaders::uniform::{UniformBoolean, UniformFloat, UniformTexture};
 use crate::opengl::shaders::UniformVec3;
 use crate::opengl::shaders::{uniform::UniformAdapter, RenderState, ShaderProgram, UniformMatrix4};
 use crate::rendering::abstracted::irenderer::IRenderer;
@@ -65,10 +65,7 @@ impl<T: SceneObject + 'static> EntityRenderer<T> {
 
         shader_program.add_per_instance_uniform(Rc::new(RefCell::new(UniformAdapter {
             uniform: UniformVec3::new("uCameraPos"),
-            extractor: Box::new(|state: &RenderState<T>| {
-                state
-                    .camera().transform.position
-            }),
+            extractor: Box::new(|state: &RenderState<T>| state.camera().transform.position),
         })));
 
         shader_program.add_per_instance_uniform(Rc::new(RefCell::new(UniformAdapter {
@@ -84,6 +81,26 @@ impl<T: SceneObject + 'static> EntityRenderer<T> {
         shader_program.add_per_instance_uniform(Rc::new(RefCell::new(UniformAdapter {
             uniform: UniformBoolean::new("uHasVertexColors"),
             extractor: Box::new(|state: &RenderState<T>| state.has_vertex_colors()),
+        })));
+
+        shader_program.add_per_instance_uniform(Rc::new(RefCell::new(UniformAdapter {
+            uniform: UniformFloat::new("uMetallicFactor"),
+            extractor: Box::new(|state: &RenderState<T>| {
+                state
+                    .mesh_material()
+                    .map(|mat| mat.metallic_factor)
+                    .unwrap_or(0.0)
+            }),
+        })));
+
+        shader_program.add_per_instance_uniform(Rc::new(RefCell::new(UniformAdapter {
+            uniform: UniformFloat::new("uRoughnessFactor"),
+            extractor: Box::new(|state: &RenderState<T>| {
+                state
+                    .mesh_material()
+                    .map(|mat| mat.roughness_factor)
+                    .unwrap_or(0.5)
+            }),
         })));
 
         log::info!("EntityRenderer initialized successfully");

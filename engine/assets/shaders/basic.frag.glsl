@@ -1,5 +1,6 @@
 #version 300 es
-precision mediump float;
+precision highp float;
+precision highp int;
 
 in vec3       v_pos;
 in vec2       v_uv;
@@ -15,6 +16,8 @@ uniform sampler2D albedoTex;
 uniform bool      isAlbedoMapped;
 uniform bool      uHasVertexColors;
 uniform vec3      uCameraPos;
+uniform float     uMetallicFactor;
+uniform float     uRoughnessFactor;
 
 void main() {
     vec4 albedo;
@@ -31,7 +34,10 @@ void main() {
     if (albedo.a < 0.01) discard;
 
     gAlbedo            = albedo;
+
     vec3 N = normalize(v_normal);
-    gNormalMetalness = vec4(N, 0.0);
-    gPositionRoughness = vec4(v_pos, 0.5);
+
+    // Output to G-Buffer
+    gNormalMetalness = vec4(normalize(N), uMetallicFactor);
+    gPositionRoughness = vec4(v_pos, uRoughnessFactor);
 }

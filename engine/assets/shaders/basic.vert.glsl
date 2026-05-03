@@ -1,5 +1,6 @@
 #version 300 es
-precision mediump float;
+precision highp float;
+precision highp int;
 
 layout (location = 0) in vec3 pos;
 layout (location = 1) in vec2 uv;
@@ -19,6 +20,6 @@ void main() {
     gl_Position   = uVP   * worldPos;
     v_pos    = worldPos.xyz;
     v_uv     = uv;
-    v_normal = normalize(mat3(uModel) * norm);
+    v_normal = transpose(inverse(mat3(uModel))) * norm;
     v_color  = vertColor;
 }

@@ -97,6 +97,12 @@ impl LightingPass {
                 extractor: Box::new(move |_: &RenderState<CameraOnly>| l.borrow().ambient_min),
             })));
         }
+        {
+            program.add_uniform(Rc::new(RefCell::new(UniformAdapter {
+                uniform: UniformVec3::new("uCameraPos"),
+                extractor: Box::new(|state: &RenderState<CameraOnly>| state.camera().transform.position),
+            })));
+        }
 
         Self { program, lights }
     }
