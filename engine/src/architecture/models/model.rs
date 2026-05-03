@@ -3,6 +3,7 @@ use cgmath::Vector3;
 use crate::rendering::abstracted::processable::Processable;
 use crate::{
     architecture::models::{material::Material, mesh::Mesh},
+    architecture::scene::node::transform::Transform,
     opengl::shaders::render_state::RenderState,
 };
 
@@ -14,6 +15,11 @@ pub trait Model {
     fn get_lowest(&self) -> f32;
     fn get_meshes(&self) -> &[Mesh];
     fn centroid(&self) -> Option<Vector3<f32>>;
+
+    /// Per-mesh local transform, if the model preserves node transforms.
+    fn mesh_transform(&self, _mesh_idx: usize) -> Option<Transform> {
+        None
+    }
 
     /// Number of sub-meshes (default: get_meshes().len()).
     fn get_mesh_count(&self) -> usize {

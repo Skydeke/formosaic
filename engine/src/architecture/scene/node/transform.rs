@@ -31,6 +31,33 @@ impl Transform {
         }
     }
 
+    pub fn from_matrix(matrix: Matrix4<f32>) -> Self {
+        let position = matrix.w.truncate();
+
+        let basis_x = matrix.x.truncate();
+        let basis_y = matrix.y.truncate();
+        let basis_z = matrix.z.truncate();
+
+        let scale = Vector3::new(
+            basis_x.magnitude().max(0.000001),
+            basis_y.magnitude().max(0.000001),
+            basis_z.magnitude().max(0.000001),
+        );
+
+        let rot_matrix = Matrix3::from_cols(
+            basis_x / scale.x,
+            basis_y / scale.y,
+            basis_z / scale.z,
+        );
+
+        Self {
+            position,
+            rotation: Quaternion::from(rot_matrix),
+            scale,
+            parent: None,
+        }
+    }
+
     pub fn set_parent(&mut self, parent: Option<Weak<RefCell<dyn NodeBehavior>>>) {
         self.parent = parent;
     }

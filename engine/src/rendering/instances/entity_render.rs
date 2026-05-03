@@ -40,7 +40,14 @@ impl<T: SceneObject + 'static> EntityRenderer<T> {
         shader_program.add_per_instance_uniform(Rc::new(RefCell::new(UniformAdapter {
             uniform: UniformMatrix4::new("uModel"),
             extractor: Box::new(|state: &RenderState<T>| {
-                state.instance().unwrap().transform().get_matrix()
+                let entity = state.instance().unwrap();
+                let entity_matrix = entity.transform().get_matrix();
+                let mesh_matrix = entity
+                    .get_model()
+                    .mesh_transform(state.instance_mesh_idx() as usize)
+                    .map(|t| t.get_matrix())
+                    .unwrap_or_else(|| cgmath::Matrix4::from_scale(1.0));
+                entity_matrix * mesh_matrix
             }),
         })));
 
@@ -60,6 +67,26 @@ impl<T: SceneObject + 'static> EntityRenderer<T> {
                     .mesh_material()
                     .map(|mat| mat.diffuse_color.truncate())
                     .unwrap_or(Vector3::new(1.0, 1.0, 1.0))
+            }),
+        })));
+
+        shader_program.add_per_instance_uniform(Rc::new(RefCell::new(UniformAdapter {
+            uniform: UniformFloat::new("uOpacity"),
+            extractor: Box::new(|state: &RenderState<T>| {
+                state
+                    .mesh_material()
+                    .map(|mat| mat.diffuse_color.w)
+                    .unwrap_or(1.0)
+            }),
+        })));
+
+        shader_program.add_per_instance_uniform(Rc::new(RefCell::new(UniformAdapter {
+            uniform: UniformFloat::new("uAlphaCutoff"),
+            extractor: Box::new(|state: &RenderState<T>| {
+                match state.mesh_material().map(|mat| mat.alpha_mode) {
+                    Some(crate::architecture::models::material::AlphaMode::Mask(cutoff)) => cutoff,
+                    _ => 0.01,
+                }
             }),
         })));
 

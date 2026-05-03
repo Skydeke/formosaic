@@ -8,15 +8,17 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use cgmath::{Vector3, Vector4};
+use cgmath::{Matrix4, Vector3, Vector4};
 use russimp_ng::material::{Material as AiMaterial, PropertyTypeInfo, TextureType};
 use russimp_ng::mesh::Mesh as AiMesh;
 use russimp_ng::scene::{PostProcess, Scene};
+use russimp_ng::node::Node as AiNode;
 
 use crate::architecture::models::material::{AlphaMode, Material};
 use crate::architecture::models::mesh::Mesh;
 use crate::architecture::models::model_cache::ModelCache;
 use crate::architecture::models::simple_model::SimpleModel;
+use crate::architecture::scene::node::transform::Transform;
 use crate::opengl::constants::render_mode::RenderMode;
 use crate::opengl::fbos::simple_texture::SimpleTexture;
 use crate::opengl::textures::texture::Texture;
@@ -33,11 +35,8 @@ impl ModelLoader {
             bytes,
             vec![
                 PostProcess::Triangulate,
-                PostProcess::GenerateSmoothNormals,
-                PostProcess::ForceGenerateNormals,
                 PostProcess::JoinIdenticalVertices,
                 PostProcess::ImproveCacheLocality,
-                PostProcess::PreTransformVertices,
                 PostProcess::EmbedTextures,
                 PostProcess::FlipUVs,
             ],
@@ -66,6 +65,11 @@ impl ModelLoader {
 
         let materials: Vec<Material> = scene.materials.iter().map(Self::process_material).collect();
 
+        let mut mesh_transforms: Vec<Option<Transform>> = vec![None; scene.meshes.len()];
+        if let Some(root) = &scene.root {
+            Self::collect_node_transforms(root, Matrix4::from_scale(1.0), &mut mesh_transforms);
+        }
+
         let meshes: Vec<Mesh> = scene
             .meshes
             .iter()
@@ -89,10 +93,16 @@ impl ModelLoader {
             Vector3::new(0.0, 0.0, 0.0)
         };
 
-        let model = Rc::new(RefCell::new(SimpleModel::with_centroid(
+        let mesh_transforms = mesh_transforms
+            .into_iter()
+            .map(|m| m.unwrap_or_else(Transform::new))
+            .collect();
+
+        let model = Rc::new(RefCell::new(SimpleModel::with_mesh_transforms(
             meshes,
             RenderMode::Triangles,
-            centroid,
+            Some(centroid),
+            mesh_transforms,
         )));
 
         ModelCache::insert(cache_key.to_string(), model.clone());
@@ -275,6 +285,38 @@ impl ModelLoader {
         Mesh::from_raw(positions, normals, texcoords, indices, colors)
     }
 
+    fn ai_matrix_to_cg(matrix: &russimp_ng::Matrix4x4) -> Matrix4<f32> {
+        Matrix4::new(
+            matrix.a1, matrix.b1, matrix.c1, matrix.d1,
+            matrix.a2, matrix.b2, matrix.c2, matrix.d2,
+            matrix.a3, matrix.b3, matrix.c3, matrix.d3,
+            matrix.a4, matrix.b4, matrix.c4, matrix.d4,
+        )
+    }
+
+    fn collect_node_transforms(
+        node: &Rc<AiNode>,
+        parent_transform: Matrix4<f32>,
+        mesh_transforms: &mut [Option<Transform>],
+    ) {
+        let local = Self::ai_matrix_to_cg(&node.transformation);
+        let world = parent_transform * local;
+        let world_transform = Transform::from_matrix(world);
+
+        for mesh_idx in &node.meshes {
+            let idx = *mesh_idx as usize;
+            if let Some(slot) = mesh_transforms.get_mut(idx) {
+                if slot.is_none() {
+                    *slot = Some(world_transform.clone());
+                }
+            }
+        }
+
+        for child in node.children.borrow().iter() {
+            Self::collect_node_transforms(child, world, mesh_transforms);
+        }
+    }
+
     // ── Material processing ───────────────────────────────────────────────────
 
     /// Build a full Material from Assimp properties and embedded textures.
@@ -340,6 +382,9 @@ impl ModelLoader {
                     if let PropertyTypeInfo::FloatArray(v) = &prop.data {
                         if !v.is_empty() {
                             mat.diffuse_color.w = v[0];
+                            if v[0] < 0.999 && matches!(mat.alpha_mode, AlphaMode::Opaque) {
+                                mat.alpha_mode = AlphaMode::Blend;
+                            }
                         }
                     }
                 }
@@ -359,11 +404,18 @@ impl ModelLoader {
                         }
                     }
                 }
-                "$mat.twosided" => {
-                    if let PropertyTypeInfo::IntegerArray(v) = &prop.data {
-                        if !v.is_empty() {
-                            mat.cull_backface = v[0] == 0;
+                "$mat.twosided" | "$mat.twoSided" | "$mat.two_sided" => {
+                    match &prop.data {
+                        PropertyTypeInfo::IntegerArray(v) => {
+                            if !v.is_empty() { mat.cull_backface = v[0] == 0; }
                         }
+                        PropertyTypeInfo::FloatArray(v) => {
+                            if !v.is_empty() { mat.cull_backface = v[0] == 0.0; }
+                        }
+                        PropertyTypeInfo::String(s) => {
+                            mat.cull_backface = s != "true" && s != "1";
+                        }
+                        _ => {}
                     }
                 }
                 _ => {

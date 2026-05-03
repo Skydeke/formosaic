@@ -6,7 +6,7 @@ use crate::{
         objects::{attribute::Attribute, data_buffer::DataBuffer, vao::Vao},
     },
 };
-use cgmath::Vector3;
+use cgmath::{InnerSpace, Matrix3, Matrix4, SquareMatrix, Vector3};
 use std::rc::Rc;
 
 pub struct Mesh {
@@ -36,11 +36,43 @@ impl Mesh {
         let vert_count = tri_count * 3;
 
         let mut flat_pos    = Vec::with_capacity(vert_count * 3);
-        let mut flat_norm   = Vec::with_capacity(if normals.is_empty()   { 0 } else { vert_count * 3 });
+        let mut flat_norm   = Vec::with_capacity(vert_count * 3);
         let mut flat_tex    = Vec::with_capacity(if texcoords.is_empty() { 0 } else { vert_count * 2 });
         let mut flat_colors = Vec::with_capacity(if colors.is_empty()    { 0 } else { vert_count * 4 });
+        let use_face_normals = normals.is_empty();
 
         for tri in 0..tri_count {
+            let i0 = indices[tri * 3] as usize;
+            let i1 = indices[tri * 3 + 1] as usize;
+            let i2 = indices[tri * 3 + 2] as usize;
+
+            let face_normal = if use_face_normals {
+                let p0 = Vector3::new(
+                    positions[i0 * 3],
+                    positions[i0 * 3 + 1],
+                    positions[i0 * 3 + 2],
+                );
+                let p1 = Vector3::new(
+                    positions[i1 * 3],
+                    positions[i1 * 3 + 1],
+                    positions[i1 * 3 + 2],
+                );
+                let p2 = Vector3::new(
+                    positions[i2 * 3],
+                    positions[i2 * 3 + 1],
+                    positions[i2 * 3 + 2],
+                );
+
+                let n = (p1 - p0).cross(p2 - p0);
+                if n.magnitude2() > 0.0 {
+                    n.normalize()
+                } else {
+                    Vector3::new(0.0, 1.0, 0.0)
+                }
+            } else {
+                Vector3::new(0.0, 0.0, 0.0)
+            };
+
             for corner in 0..3 {
                 let vi = indices[tri * 3 + corner] as usize;
 
@@ -48,7 +80,11 @@ impl Mesh {
                 flat_pos.push(positions[vi * 3 + 1]);
                 flat_pos.push(positions[vi * 3 + 2]);
 
-                if !normals.is_empty() {
+                if use_face_normals {
+                    flat_norm.push(face_normal.x);
+                    flat_norm.push(face_normal.y);
+                    flat_norm.push(face_normal.z);
+                } else {
                     flat_norm.push(normals[vi * 3]);
                     flat_norm.push(normals[vi * 3 + 1]);
                     flat_norm.push(normals[vi * 3 + 2]);
@@ -137,7 +173,13 @@ impl Mesh {
         }
     }
 
-    pub fn scramble_along_axis(&mut self, axis: Vector3<f32>, min_disp: f32, max_disp: f32) {
+    pub fn scramble_along_axis(
+        &mut self,
+        axis: Vector3<f32>,
+        min_disp: f32,
+        max_disp: f32,
+        mesh_transform: Matrix4<f32>,
+    ) {
         use cgmath::InnerSpace;
         use rand::Rng;
 
@@ -152,6 +194,12 @@ impl Mesh {
         if self.positions.is_empty() { return; }
 
         let axis = axis.normalize();
+        let basis = Matrix3::new(
+            mesh_transform.x.x, mesh_transform.x.y, mesh_transform.x.z,
+            mesh_transform.y.x, mesh_transform.y.y, mesh_transform.y.z,
+            mesh_transform.z.x, mesh_transform.z.y, mesh_transform.z.z,
+        );
+        let inv_basis = basis.invert().unwrap_or(Matrix3::from_scale(1.0));
         let mut rng = rand::rng();
         let n = self.positions.len();
         let mut offsets = vec![0.0f32; n];
@@ -159,7 +207,7 @@ impl Mesh {
         let tri_count = n / 9;
         for tri in 0..tri_count {
             let amount: f32 = rng.random_range(min_disp..max_disp);
-            let disp = axis * amount;
+            let disp = inv_basis * (axis * amount);
             let base = tri * 9;
             for corner in 0..3 {
                 let v = base + corner * 3;

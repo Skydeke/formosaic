@@ -1,7 +1,8 @@
-use cgmath::Vector3;
+use cgmath::{Matrix4, Vector3, Vector4};
 
 use crate::architecture::models::mesh::Mesh;
 use crate::architecture::models::model::Model;
+use crate::architecture::scene::node::transform::Transform;
 use crate::rendering::abstracted::processable::Processable;
 use crate::rendering::abstracted::renderable::Renderable;
 use crate::opengl::constants::render_mode::RenderMode;
@@ -38,6 +39,7 @@ pub struct SimpleModel {
     meshes: Vec<Mesh>,
     render_mode: RenderMode,
     centroid: Option<Vector3<f32>>,
+    mesh_transforms: Vec<Transform>,
 }
 
 impl SimpleModel {
@@ -50,6 +52,7 @@ impl SimpleModel {
         render_mode: RenderMode,
         centroid: Vector3<f32>,
     ) -> Self {
+        let mesh_count = meshes.len();
         if meshes.is_empty() {
             panic!("SimpleModel must have at least one mesh");
         }
@@ -57,10 +60,12 @@ impl SimpleModel {
             meshes,
             render_mode,
             centroid: Some(centroid),
+            mesh_transforms: vec![Transform::new(); mesh_count],
         }
     }
 
     pub fn with_bounds(meshes: Vec<Mesh>, render_mode: RenderMode) -> Self {
+        let mesh_count = meshes.len();
         if meshes.is_empty() {
             panic!("SimpleModel must have at least one mesh");
         }
@@ -68,6 +73,24 @@ impl SimpleModel {
             meshes,
             render_mode,
             centroid: None,
+            mesh_transforms: vec![Transform::new(); mesh_count],
+        }
+    }
+
+    pub fn with_mesh_transforms(
+        meshes: Vec<Mesh>,
+        render_mode: RenderMode,
+        centroid: Option<Vector3<f32>>,
+        mesh_transforms: Vec<Transform>,
+    ) -> Self {
+        if meshes.is_empty() {
+            panic!("SimpleModel must have at least one mesh");
+        }
+        Self {
+            meshes,
+            render_mode,
+            centroid,
+            mesh_transforms,
         }
     }
 
@@ -95,13 +118,19 @@ impl SimpleModel {
         let mut min = Vector3::new(f32::INFINITY, f32::INFINITY, f32::INFINITY);
         let mut max = Vector3::new(f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY);
 
-        for mesh in &self.meshes {
+        for (mesh_idx, mesh) in self.meshes.iter().enumerate() {
+            let mesh_transform = self
+                .mesh_transforms
+                .get(mesh_idx)
+                .map(|t| t.get_matrix())
+                .unwrap_or_else(|| Matrix4::from_scale(1.0));
             let pos = mesh.positions();
             let mut i = 0;
             while i + 2 < pos.len() {
-                let x = pos[i];
-                let y = pos[i + 1];
-                let z = pos[i + 2];
+                let p = mesh_transform * Vector4::new(pos[i], pos[i + 1], pos[i + 2], 1.0);
+                let x = p.x;
+                let y = p.y;
+                let z = p.z;
                 if x < min.x {
                     min.x = x;
                 }
@@ -158,8 +187,13 @@ impl SimpleModel {
 
     /// Scramble all meshes: offset every triangle by a random amount along `axis`.
     pub fn scramble_along_axis(&mut self, axis: Vector3<f32>, min_disp: f32, max_disp: f32) {
-        for mesh in &mut self.meshes {
-            mesh.scramble_along_axis(axis, min_disp, max_disp);
+        for (mesh_idx, mesh) in self.meshes.iter_mut().enumerate() {
+            let mesh_transform = self
+                .mesh_transforms
+                .get(mesh_idx)
+                .map(|t| t.get_matrix())
+                .unwrap_or_else(|| cgmath::Matrix4::from_scale(1.0));
+            mesh.scramble_along_axis(axis, min_disp, max_disp, mesh_transform);
         }
     }
 
@@ -202,10 +236,22 @@ impl Model for SimpleModel {
     }
 
     fn get_lowest(&self) -> f32 {
-        self.meshes
-            .iter()
-            .map(|m| m.lowest())
-            .fold(f32::INFINITY, |a, b| a.min(b))
+        let mut lowest = f32::INFINITY;
+        for (mesh_idx, mesh) in self.meshes.iter().enumerate() {
+            let mesh_transform = self
+                .mesh_transforms
+                .get(mesh_idx)
+                .map(|t| t.get_matrix())
+                .unwrap_or_else(|| Matrix4::from_scale(1.0));
+            let pos = mesh.positions();
+            let mut i = 0;
+            while i + 2 < pos.len() {
+                let p = mesh_transform * Vector4::new(pos[i], pos[i + 1], pos[i + 2], 1.0);
+                lowest = lowest.min(p.y);
+                i += 3;
+            }
+        }
+        lowest
     }
 
     fn get_meshes(&self) -> &[Mesh] {
@@ -214,5 +260,9 @@ impl Model for SimpleModel {
 
     fn centroid(&self) -> Option<Vector3<f32>> {
         self.centroid
+    }
+
+    fn mesh_transform(&self, mesh_idx: usize) -> Option<Transform> {
+        self.mesh_transforms.get(mesh_idx).cloned()
     }
 }

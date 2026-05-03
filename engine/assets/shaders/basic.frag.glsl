@@ -4,7 +4,7 @@ precision highp int;
 
 in vec3       v_pos;
 in vec2       v_uv;
-flat in vec3  v_normal;
+in vec3  v_normal;
 in vec4       v_color;
 
 layout(location = 0) out vec4 gAlbedo;
@@ -18,6 +18,8 @@ uniform bool      uHasVertexColors;
 uniform vec3      uCameraPos;
 uniform float     uMetallicFactor;
 uniform float     uRoughnessFactor;
+uniform float     uOpacity;
+uniform float     uAlphaCutoff;
 
 void main() {
     vec4 albedo;
@@ -31,13 +33,14 @@ void main() {
         albedo = vec4(albedoConst, 1.0);
     }
 
-    if (albedo.a < 0.01) discard;
+    albedo.a *= uOpacity;
+    if (albedo.a < uAlphaCutoff) discard;
 
-    gAlbedo            = albedo;
+    gAlbedo = albedo;
 
     vec3 N = normalize(v_normal);
 
     // Output to G-Buffer
-    gNormalMetalness = vec4(normalize(N), uMetallicFactor);
+    gNormalMetalness = vec4(N, uMetallicFactor);
     gPositionRoughness = vec4(v_pos, uRoughnessFactor);
 }

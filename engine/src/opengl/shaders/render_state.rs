@@ -91,4 +91,5 @@ impl<'a, T: Processable> RenderState<'a, T> {
     pub fn mesh_material(&self)          -> Option<&Material> { self.material_owned.as_ref() }
     pub fn has_vertex_colors(&self)      -> bool              { self.has_vertex_colors }
     pub fn has_instance(&self)           -> bool              { self.instance.is_some() }
+    pub fn instance_mesh_idx(&self)      -> i32               { self.instance_mesh_idx }
 }
