@@ -123,8 +123,9 @@ impl IRenderer for ShineRenderer {
         unsafe {
             gl::Disable(gl::DEPTH_TEST);
             gl::Disable(gl::CULL_FACE);
+            gl::Disable(gl::DITHER);
             gl::Enable(gl::BLEND);
-            gl::BlendFunc(gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA);
+            gl::BlendFunc(gl::ONE, gl::ONE);
         }
 
         self.shader.bind();
@@ -144,6 +145,7 @@ impl IRenderer for ShineRenderer {
             gl::Enable(gl::DEPTH_TEST);
             gl::Enable(gl::CULL_FACE);
             gl::Disable(gl::BLEND);
+            gl::Enable(gl::DITHER);
             // Clean up texture units.
             gl::ActiveTexture(gl::TEXTURE1);
             gl::BindTexture(gl::TEXTURE_2D, 0);

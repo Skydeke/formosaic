@@ -209,9 +209,11 @@ void main() {
             vec3(1.0 / 2.2)
         );
 
+    vec3 composed = mix(uClearColor, colour, alpha);
+
     imageStore(
         gOutput,
         coord,
-        vec4(colour, alpha)
+        vec4(composed, 1.0)
     );
 }
