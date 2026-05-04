@@ -23,7 +23,7 @@ pub struct PuzzleParams {
 }
 
 impl PuzzleParams {
-    fn default_for(target_world_radius: f32) -> Self {
+    pub fn default_for(target_world_radius: f32) -> Self {
         Self {
             entity_scale: 0.005,
             orbit_distance: target_world_radius * 3.0,

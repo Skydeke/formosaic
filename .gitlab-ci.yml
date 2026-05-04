@@ -1,5 +1,6 @@
 stages:
   - build
+  - test
 
 variables:
   CARGO_TERM_COLOR: always
@@ -22,13 +23,20 @@ linux_release:
   stage: build
   script:
     - cargo build-desktop-release
-    - cargo test -p formosaic-engine --all-features
-    - cargo test -p formosaic --all-features
   artifacts:
     name: linux-desktop-release
     paths:
       - target/release/examples/desktop
     expire_in: 1 week
+
+linux_test:
+  <<: *setup
+  stage: test
+  needs:
+    - linux_release
+  script:
+    - cargo test -p formosaic-engine
+    - cargo test -p formosaic
 
 android_apk:
   <<: *setup

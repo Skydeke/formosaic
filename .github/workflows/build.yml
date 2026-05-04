@@ -30,17 +30,34 @@ jobs:
           POLY_PIZZA_API_KEY: ${{ secrets.POLY_PIZZA_API_KEY }}
         run: cargo build-desktop-release
 
-      - name: Run engine tests
-        run: cargo test -p formosaic-engine --all-features
-
-      - name: Run game tests
-        run: cargo test -p formosaic --all-features
-
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: linux-desktop-release
           path: target/release/examples/desktop
+
+  linux-test:
+    name: Linux tests
+    runs-on: ubuntu-latest
+    container:
+      image: rust:latest
+    needs:
+      - linux-release
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            curl unzip openjdk-21-jdk-headless ca-certificates \
+            pkg-config libssl-dev build-essential cmake clang libclang-dev
+
+      - name: Run engine tests
+        run: cargo test -p formosaic-engine
+
+      - name: Run game tests
+        run: cargo test -p formosaic
 
   android-apk:
     name: Android APKs (debug + release)

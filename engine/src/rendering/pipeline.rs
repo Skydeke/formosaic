@@ -1,5 +1,5 @@
 //! Generic render pipeline — orchestrates geometry → lighting → late → overlay
-//! passes each frame, then imgui on top.
+//! passes each frame, then imgui on top (when the `windowed` feature is enabled).
 //!
 //! Pass order and registration:
 //!   `add_renderer()`       — geometry, late, or overlay renderers (sorted by pass)
@@ -9,10 +9,7 @@ use crate::{
     architecture::scene::{entity::simple_entity::SimpleEntity, scene_context::SceneContext},
     rendering::{
         abstracted::irenderer::{IRenderer, RenderPass},
-        instances::{
-            entity_render::EntityRenderer,
-            imgui_render::ImguiGlRenderer,
-        },
+        instances::entity_render::EntityRenderer,
     },
     opengl::{
         constants::{data_type::DataType, format_type::FormatType},
@@ -32,6 +29,8 @@ use crate::{
         },
     },
 };
+#[cfg(feature = "windowed")]
+use crate::rendering::instances::imgui_render::ImguiGlRenderer;
 use cgmath::Vector2;
 use std::{cell::RefCell, rc::Rc};
 
@@ -40,6 +39,7 @@ pub struct Pipeline {
     renderers:     Vec<Box<dyn IRenderer>>,
     /// Dedicated imgui renderer — always runs after all other passes.
     /// Stored separately so it can be accessed directly without any downcast.
+    #[cfg(feature = "windowed")]
     imgui:         Option<ImguiGlRenderer>,
     context:       Rc<RefCell<SceneContext>>,
     deferred_fbo:  Fbo,
@@ -51,6 +51,7 @@ impl Pipeline {
     pub fn new(context: Rc<RefCell<SceneContext>>) -> Self {
         let mut pipeline = Self {
             renderers:     Vec::new(),
+            #[cfg(feature = "windowed")]
             imgui:         None,
             context,
             deferred_fbo:  Self::create_deferred_fbo(1, 1),
@@ -70,16 +71,19 @@ impl Pipeline {
 
     /// Register the Dear ImGui renderer — runs after all other passes every frame.
     /// Only one imgui renderer is supported; a second call replaces the first.
+    #[cfg(feature = "windowed")]
     pub fn add_imgui_renderer(&mut self, r: ImguiGlRenderer) {
         self.imgui = Some(r);
     }
 
     /// Direct access to the imgui renderer (no downcast needed).
+    #[cfg(feature = "windowed")]
     pub fn imgui_renderer(&self) -> Option<&ImguiGlRenderer> {
         self.imgui.as_ref()
     }
 
     /// Direct mutable access to the imgui renderer.
+    #[cfg(feature = "windowed")]
     pub fn imgui_renderer_mut(&mut self) -> Option<&mut ImguiGlRenderer> {
         self.imgui.as_mut()
     }
@@ -128,8 +132,6 @@ impl Pipeline {
     }
 
     fn geometry_pass(&mut self, clear_color: [f32; 3]) {
-        // Skip geometry entirely when the menu is showing — the last rendered
-        // model would otherwise bleed through behind the UI.
         let show_menu = self.context.borrow().show_menu;
 
         self.deferred_fbo.bind(FboTarget::DrawFramebuffer);
@@ -190,16 +192,23 @@ impl Pipeline {
         }
     }
 
-    /// Imgui pass — always last, after overlay.
     fn imgui_pass(&mut self) {
-        let ctx = self.context.borrow();
-        if let Some(r) = &mut self.imgui {
-            r.render(&ctx);
+        #[cfg(feature = "windowed")]
+        {
+            let ctx = self.context.borrow();
+            if let Some(r) = &mut self.imgui {
+                r.render(&ctx);
+            }
+        }
+        #[cfg(not(feature = "windowed"))]
+        {
+            let _ = &self.context;
         }
     }
 
     fn finish_pass(&mut self) {
         for r in &mut self.renderers { r.finish(); }
+        #[cfg(feature = "windowed")]
         if let Some(r) = &mut self.imgui { r.finish(); }
     }
 
