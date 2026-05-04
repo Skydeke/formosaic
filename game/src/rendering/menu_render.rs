@@ -245,6 +245,5 @@ impl IRenderer for MenuRenderer {
         }
     }
 
-    fn any_processed(&self) -> bool { true }
     fn finish(&mut self) {}
 }

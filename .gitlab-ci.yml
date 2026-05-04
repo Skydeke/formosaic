@@ -22,6 +22,8 @@ linux_release:
   stage: build
   script:
     - cargo build-desktop-release
+    - cargo test -p formosaic-engine --all-features
+    - cargo test -p formosaic --all-features
   artifacts:
     name: linux-desktop-release
     paths:

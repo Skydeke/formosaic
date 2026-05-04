@@ -30,6 +30,12 @@ jobs:
           POLY_PIZZA_API_KEY: ${{ secrets.POLY_PIZZA_API_KEY }}
         run: cargo build-desktop-release
 
+      - name: Run engine tests
+        run: cargo test -p formosaic-engine --all-features
+
+      - name: Run game tests
+        run: cargo test -p formosaic --all-features
+
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

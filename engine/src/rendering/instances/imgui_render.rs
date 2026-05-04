@@ -16,7 +16,6 @@ use imgui::{DrawData, DrawIdx, DrawVert, TextureId};
 use winit::window::Window;
 
 use crate::architecture::scene::{node::ui_node::UiNode, scene_context::SceneContext};
-use crate::architecture::scene::node::node::NodeBehavior;
 use crate::opengl::{
     constants::{data_type::DataType, vbo_target::VboTarget, vbo_usage::VboUsage},
     fbos::simple_texture::SimpleTexture,
@@ -57,7 +56,6 @@ struct GlResources {
 
 impl IRenderer for GlResources {
     fn render(&mut self, _ctx: &SceneContext) {}
-    fn any_processed(&self) -> bool { false }
     fn finish(&mut self) {}
 }
 
@@ -268,7 +266,5 @@ impl IRenderer for ImguiGlRenderer {
         let draw_data = self.imgui.render();
         self.gl.draw(draw_data);
     }
-
-    fn any_processed(&self) -> bool { true }
     fn finish(&mut self) {}
 }

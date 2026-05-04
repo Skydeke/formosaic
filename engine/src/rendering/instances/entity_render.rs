@@ -151,12 +151,7 @@ impl<T: SceneObject + 'static> IRenderer for EntityRenderer<T> {
 
                     let model = entity.model();
 
-                    // ── Resolve everything we need from the model BEFORE
-                    //    taking borrow_mut — avoids aliasing with get_model()
-                    //    inside RenderState (SimpleEntity uses unsafe as_ptr).
                     let mesh_count = model.borrow().get_mesh_count();
-                    // Resolve all per-mesh data from shared borrows BEFORE
-                    // taking borrow_mut to avoid aliased borrow UB.
                     let materials: Vec<Option<Material>> = (0..mesh_count)
                         .map(|i| model.borrow().get_material(i).cloned())
                         .collect();
@@ -164,10 +159,9 @@ impl<T: SceneObject + 'static> IRenderer for EntityRenderer<T> {
                         .map(|i| model.borrow().has_vertex_colors(i))
                         .collect();
 
-                    let mut model_ref = model.borrow_mut();
-
                     for i in 0..mesh_count {
                         let material = materials[i].as_ref();
+                        let has_vc = vert_colors[i];
                         self.prepare_material(material);
 
                         let render_state = RenderState::new_preresolved(
@@ -175,11 +169,13 @@ impl<T: SceneObject + 'static> IRenderer for EntityRenderer<T> {
                             entity,
                             &camera_ref,
                             i,
-                            materials[i].clone(),
-                            vert_colors[i],
+                            material,
+                            has_vc,
                         );
                         self.shader_program
                             .update_per_instance_uniforms(&render_state);
+
+                        let mut model_ref = model.borrow_mut();
                         model_ref.bind_and_configure(i);
                         model_ref.render(&render_state, i);
                         model_ref.unbind(i);
@@ -195,9 +191,6 @@ impl<T: SceneObject + 'static> IRenderer for EntityRenderer<T> {
         }
     }
 
-    fn any_processed(&self) -> bool {
-        true
-    }
     fn finish(&mut self) {}
 }
 

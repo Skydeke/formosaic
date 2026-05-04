@@ -198,8 +198,5 @@ impl LightingPass {
 
 impl IRenderer for LightingPass {
     fn render(&mut self, _context: &SceneContext) {}
-    fn any_processed(&self) -> bool {
-        true
-    }
     fn finish(&mut self) {}
 }

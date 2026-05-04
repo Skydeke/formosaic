@@ -18,7 +18,6 @@ pub trait IRenderer {
         RenderPass::Geometry
     }
     fn render(&mut self, context: &SceneContext);
-    fn any_processed(&self) -> bool;
     fn finish(&mut self);
 
     /// Called before rendering a model to set up material-specific GL state.

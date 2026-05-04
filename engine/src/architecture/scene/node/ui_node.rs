@@ -143,7 +143,7 @@ impl NodeChildren for UiNode {
         self.children.push(child);
     }
 
-    fn get_children_impl(&self) -> Vec<Rc<RefCell<dyn NodeBehavior>>> {
-        self.children.clone()
+    fn children(&self) -> &[Rc<RefCell<dyn NodeBehavior>>] {
+        &self.children
     }
 }

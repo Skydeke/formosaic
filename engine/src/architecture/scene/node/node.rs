@@ -44,9 +44,8 @@ impl Node {
 
     pub fn collect_all(node: &Rc<RefCell<dyn NodeBehavior>>) -> Vec<Rc<RefCell<dyn NodeBehavior>>> {
         let mut ret = vec![Rc::clone(node)];
-        ret.extend(node.borrow().get_children_impl());
-        for child in node.borrow().get_children_impl() {
-            ret.extend(Self::collect_all(&child));
+        for child in node.borrow().children() {
+            ret.extend(Self::collect_all(child));
         }
         ret
     }
@@ -56,14 +55,12 @@ impl Node {
     ) -> Vec<Rc<RefCell<dyn NodeBehavior>>> {
         let mut ret = Vec::new();
 
-        // Check if current node is of the type we're looking for
         if node.borrow().as_any().is::<T>() {
             ret.push(Rc::clone(node));
         }
 
-        // Recursively check children
-        for child in node.borrow().get_children_impl() {
-            ret.extend(Self::collect_of_type::<T>(&child));
+        for child in node.borrow().children() {
+            ret.extend(Self::collect_of_type::<T>(child));
         }
 
         ret
@@ -71,16 +68,16 @@ impl Node {
 
     pub fn update_all(node: &Rc<RefCell<dyn NodeBehavior>>) {
         node.borrow_mut().update();
-
-        for child in node.borrow().get_children_impl() {
+        let children = node.borrow().children().to_vec();
+        for child in children {
             Self::update_all(&child);
         }
     }
 
     pub fn process_all(node: &Rc<RefCell<dyn NodeBehavior>>) {
         node.borrow_mut().process();
-
-        for child in node.borrow().get_children_impl() {
+        let children = node.borrow().children().to_vec();
+        for child in children {
             Self::process_all(&child);
         }
     }
@@ -127,7 +124,7 @@ pub trait NodeChildren {
         parent: Rc<RefCell<dyn NodeBehavior>>,
         child: Rc<RefCell<dyn NodeBehavior>>,
     );
-    fn get_children_impl(&self) -> Vec<Rc<RefCell<dyn NodeBehavior>>>;
+    fn children(&self) -> &[Rc<RefCell<dyn NodeBehavior>>];
 }
 
 impl Default for Node {
@@ -152,7 +149,7 @@ impl NodeChildren for Node {
         self.children.push(child);
     }
 
-    fn get_children_impl(&self) -> Vec<Rc<RefCell<dyn NodeBehavior>>> {
-        self.children.clone()
+    fn children(&self) -> &[Rc<RefCell<dyn NodeBehavior>>] {
+        &self.children
     }
 }

@@ -243,14 +243,13 @@ impl Formosaic {
             scene.add_node(entity.clone());
             self.entity = Some(entity.clone());
 
-            if let Some(camera) = ctx.camera() {
-                let centroid  = entity.borrow().centroid();
-                let dist      = params.orbit_distance;
-                let (ctrl, sp) = make_scrambled_orbit(centroid, dist, solution_dir);
-                camera.borrow_mut().transform.position = sp;
-                self.orbit = Some(OrbitController::new(centroid, dist));
-                camera.borrow_mut().set_controller(Some(Box::new(ctrl)));
-            }
+            let camera = ctx.camera();
+            let centroid  = entity.borrow().centroid();
+            let dist      = params.orbit_distance;
+            let (ctrl, sp) = make_scrambled_orbit(centroid, dist, solution_dir);
+            camera.borrow_mut().transform.position = sp;
+            self.orbit = Some(OrbitController::new(centroid, dist));
+            camera.borrow_mut().set_controller(Some(Box::new(ctrl)));
         }
 
         self.model        = Some(model);
@@ -321,18 +320,17 @@ impl Formosaic {
 
         log::info!("[Formosaic] SOLVED! time={:.1}s hints={}", self.elapsed_secs, self.hints.hint_count());
 
-        if let Some(camera) = ctx.camera() {
-            let cam    = camera.borrow();
-            let target = self.orbit.as_ref().map(|o| o.target).unwrap_or(cam.transform.position);
-            let dist   = self.orbit.as_ref().map(|o| o.distance).unwrap_or(3.0);
-            let fwd    = cam.transform.forward().normalize();
-            let dir    = if fwd.dot(solution_dir) > 0.0 { solution_dir } else { -solution_dir };
-            let cam_end = target - dir * dist;
-            let cam_start = cam.transform.position;
-            drop(cam);
-            camera.borrow_mut().set_controller(None);
-            self.game_state = GameState::Restoring { elapsed: 0.0, cam_start, cam_end };
-        }
+        let camera = ctx.camera();
+        let cam    = camera.borrow();
+        let target = self.orbit.as_ref().map(|o| o.target).unwrap_or(cam.transform.position);
+        let dist   = self.orbit.as_ref().map(|o| o.distance).unwrap_or(3.0);
+        let fwd    = cam.transform.forward().normalize();
+        let dir    = if fwd.dot(solution_dir) > 0.0 { solution_dir } else { -solution_dir };
+        let cam_end = target - dir * dist;
+        let cam_start = cam.transform.position;
+        drop(cam);
+        camera.borrow_mut().set_controller(None);
+        self.game_state = GameState::Restoring { elapsed: 0.0, cam_start, cam_end };
 
         if let Some(start) = self.level_start {
             self.elapsed_secs = start.elapsed().as_secs_f32();
@@ -340,15 +338,14 @@ impl Formosaic {
     }
 
     fn finish_restore(&mut self, ctx: &mut SceneContext) {
-        if let Some(camera) = ctx.camera() {
-            let target = self.orbit.as_ref().map(|o| o.target)
-                .unwrap_or_else(|| camera.borrow().transform.position);
-            let dist = self.orbit.as_ref().map(|o| o.distance).unwrap_or(3.0);
-            let pos  = camera.borrow().transform.position;
-            let mut post = OrbitController::new(target, dist);
-            post.set_initial_position(pos);
-            camera.borrow_mut().set_controller(Some(Box::new(post)));
-        }
+        let camera = ctx.camera();
+        let target = self.orbit.as_ref().map(|o| o.target)
+            .unwrap_or_else(|| camera.borrow().transform.position);
+        let dist = self.orbit.as_ref().map(|o| o.distance).unwrap_or(3.0);
+        let pos  = camera.borrow().transform.position;
+        let mut post = OrbitController::new(target, dist);
+        post.set_initial_position(pos);
+        camera.borrow_mut().set_controller(Some(Box::new(post)));
         self.game_state = GameState::Solved;
         self.solved_timer = 0.0;
 
@@ -876,9 +873,8 @@ impl Application for Formosaic {
         self.poll_client(ctx);
 
         // Update hints once per frame and cache for the renderer.
-        self.last_hint_output = if let (Some(sc), Some(camera)) =
-            (&self.scramble_state, ctx.camera())
-        {
+        self.last_hint_output = if let Some(sc) = &self.scramble_state {
+            let camera = ctx.camera();
             let fwd    = camera.borrow().transform.forward().normalize();
             let output = self.hints.update(delta_time, fwd, sc.solution_dir);
             // Apply ghost-snap lerp (Tier 3 hint).
@@ -900,8 +896,9 @@ impl Application for Formosaic {
         match &mut self.game_state {
             GameState::Playing => {
                 self.elapsed_secs += delta_time;
-                let snap = if let (Some(sc), Some(cam)) = (&self.scramble_state, ctx.camera()) {
-                    cam.borrow().transform.forward().normalize()
+                let snap = if let Some(sc) = &self.scramble_state {
+                    let camera = ctx.camera();
+                    camera.borrow().transform.forward().normalize()
                         .dot(sc.solution_dir.normalize()).abs() >= SNAP_THRESHOLD_DOT
                 } else { false };
                 if snap { do_solve = true; }
@@ -925,11 +922,10 @@ impl Application for Formosaic {
         }
 
         if let (Some(pos), Some(tgt)) = (cam_pos, cam_target) {
-            if let Some(camera) = ctx.camera() {
-                let mut c = camera.borrow_mut();
-                c.transform.position = pos;
-                c.transform.look_at(tgt, Vector3::unit_y());
-            }
+            let camera = ctx.camera();
+            let mut c = camera.borrow_mut();
+            c.transform.position = pos;
+            c.transform.look_at(tgt, Vector3::unit_y());
         }
 
         if do_solve            { self.trigger_solve(ctx); }
@@ -959,13 +955,12 @@ impl Application for Formosaic {
             }
             _ => {
                 if matches!(self.game_state, GameState::Playing | GameState::Solved) {
-                    if let Some(camera) = ctx.camera() {
-                        let (w, h) = {
-                            let c = camera.borrow();
-                            (c.resolution.x as f32, c.resolution.y as f32)
-                        };
-                        camera.borrow_mut().controller.handle_event(event, w, h);
-                    }
+                    let camera = ctx.camera();
+                    let (w, h) = {
+                        let c = camera.borrow();
+                        (c.resolution.x as f32, c.resolution.y as f32)
+                    };
+                    camera.borrow_mut().controller.handle_event(event, w, h);
                 }
             }
         }

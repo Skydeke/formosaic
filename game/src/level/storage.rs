@@ -11,7 +11,7 @@
 //!
 //! Each level is stored as:
 //!
-//! ```
+//! ```text
 //! {data_dir}/levels/{id}/
 //!     model.glb        (or .fbx / .obj)
 //!     meta.json        (LevelMeta serialised as JSON)

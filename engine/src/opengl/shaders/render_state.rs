@@ -12,7 +12,7 @@ pub struct RenderState<'a, T: Processable> {
     camera:            Option<&'a Camera>,
     #[allow(dead_code)]
     instance_mesh_idx: i32,
-    material_owned:    Option<Material>,
+    material:          Option<&'a Material>,
     has_vertex_colors: bool,
 }
 
@@ -26,7 +26,7 @@ impl<'a, T: Processable> RenderState<'a, T> {
         instance:          &'a T,
         camera:            &'a Camera,
         instance_mesh_idx: usize,
-        material:          Option<Material>,
+        material:          Option<&'a Material>,
         has_vertex_colors: bool,
     ) -> Self {
         Self {
@@ -34,7 +34,7 @@ impl<'a, T: Processable> RenderState<'a, T> {
             instance: Some(instance),
             camera: Some(camera),
             instance_mesh_idx: instance_mesh_idx as i32,
-            material_owned: material,
+            material,
             has_vertex_colors,
         }
     }
@@ -47,14 +47,14 @@ impl<'a, T: Processable> RenderState<'a, T> {
         instance_mesh_idx: usize,
     ) -> Self {
         let model = instance.get_model();
-        let material_owned    = model.get_material(instance_mesh_idx).cloned();
+        let material        = model.get_material(instance_mesh_idx);
         let has_vertex_colors = model.has_vertex_colors(instance_mesh_idx);
         Self {
             renderer,
             instance: Some(instance),
             camera: Some(camera),
             instance_mesh_idx: instance_mesh_idx as i32,
-            material_owned,
+            material,
             has_vertex_colors,
         }
     }
@@ -65,7 +65,7 @@ impl<'a, T: Processable> RenderState<'a, T> {
             instance: None,
             camera: Some(camera),
             instance_mesh_idx: -1,
-            material_owned: None,
+            material: None,
             has_vertex_colors: false,
         }
     }
@@ -76,7 +76,7 @@ impl<'a, T: Processable> RenderState<'a, T> {
             instance: None,
             camera: None,
             instance_mesh_idx: -1,
-            material_owned: None,
+            material: None,
             has_vertex_colors: false,
         }
     }
@@ -88,7 +88,7 @@ impl<'a, T: Processable> RenderState<'a, T> {
     pub fn camera_opt(&self)             -> Option<&Camera>   { self.camera }
     pub fn instance(&self)               -> Option<&T>        { self.instance }
     pub fn mesh(&self)                   -> Option<&Mesh>     { None }
-    pub fn mesh_material(&self)          -> Option<&Material> { self.material_owned.as_ref() }
+    pub fn mesh_material(&self)          -> Option<&Material> { self.material }
     pub fn has_vertex_colors(&self)      -> bool              { self.has_vertex_colors }
     pub fn has_instance(&self)           -> bool              { self.instance.is_some() }
     pub fn instance_mesh_idx(&self)      -> i32               { self.instance_mesh_idx }

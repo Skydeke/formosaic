@@ -154,6 +154,5 @@ impl IRenderer for ShineRenderer {
         }
     }
 
-    fn any_processed(&self) -> bool { self.frame.borrow().solved_timer >= 0.0 }
     fn finish(&mut self) {}
 }

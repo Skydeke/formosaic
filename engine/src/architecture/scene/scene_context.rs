@@ -74,8 +74,13 @@ impl SceneContext {
         self.camera.borrow_mut().update();
     }
 
-    pub fn camera(&self)     -> Option<Rc<RefCell<Camera>>> { Some(self.camera.clone()) }
-    pub fn get_camera(&self) -> Rc<RefCell<Camera>>         { self.camera.clone() }
+    pub fn camera(&self) -> &RefCell<Camera> {
+        &self.camera
+    }
+
+    pub fn get_camera(&self) -> &RefCell<Camera> {
+        &self.camera
+    }
 }
 
 impl Default for SceneContext {
