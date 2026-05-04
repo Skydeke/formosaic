@@ -1,6 +1,6 @@
 stages:
-  - build
   - test
+  - build
 
 variables:
   CARGO_TERM_COLOR: always
@@ -18,9 +18,18 @@ variables:
     - tags
     - merge_requests
 
+linux_test:
+  <<: *setup
+  stage: test
+  script:
+    - cargo test -p formosaic-engine
+    - cargo test -p formosaic
+
 linux_release:
   <<: *setup
   stage: build
+  needs:
+    - linux_test
   script:
     - cargo build-desktop-release
   artifacts:
@@ -28,15 +37,6 @@ linux_release:
     paths:
       - target/release/examples/desktop
     expire_in: 1 week
-
-linux_test:
-  <<: *setup
-  stage: test
-  needs:
-    - linux_release
-  script:
-    - cargo test -p formosaic-engine
-    - cargo test -p formosaic
 
 android_apk:
   <<: *setup

@@ -7,11 +7,34 @@ on:
   pull_request:
 
 jobs:
+  linux-test:
+    name: Linux tests
+    runs-on: ubuntu-latest
+    container:
+      image: rust:latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install system dependencies
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            curl unzip openjdk-21-jdk-headless ca-certificates \
+            pkg-config libssl-dev build-essential cmake clang libclang-dev
+
+      - name: Run engine tests
+        run: cargo test -p formosaic-engine
+
+      - name: Run game tests
+        run: cargo test -p formosaic
+
   linux-release:
     name: Linux desktop (release)
     runs-on: ubuntu-latest
     container:
       image: rust:latest
+    needs:
+      - linux-test
     steps:
       - uses: actions/checkout@v4
 
@@ -35,29 +58,6 @@ jobs:
         with:
           name: linux-desktop-release
           path: target/release/examples/desktop
-
-  linux-test:
-    name: Linux tests
-    runs-on: ubuntu-latest
-    container:
-      image: rust:latest
-    needs:
-      - linux-release
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Install system dependencies
-        run: |
-          apt-get update
-          apt-get install -y --no-install-recommends \
-            curl unzip openjdk-21-jdk-headless ca-certificates \
-            pkg-config libssl-dev build-essential cmake clang libclang-dev
-
-      - name: Run engine tests
-        run: cargo test -p formosaic-engine
-
-      - name: Run game tests
-        run: cargo test -p formosaic
 
   android-apk:
     name: Android APKs (debug + release)
