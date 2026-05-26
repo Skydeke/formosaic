@@ -21,6 +21,7 @@ env_logger          = "0.10"
 rand                = "0.9.2"
 ureq                = { version = "2.10", features = ["tls"] }
 imgui               = "0.12"
+webbrowser          = "0.8"
 # winit/glutin/imgui-winit-support remain here for the feature flags and
 # Android-specific build metadata; the engine re-exports GameEngine.
 winit               = { version = "0.30.13", default-features = false, features = ["rwh_06"] }

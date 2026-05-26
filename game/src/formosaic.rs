@@ -34,11 +34,11 @@
 
 
 use cgmath::{InnerSpace, Vector3};
-use std::{cell::RefCell, rc::Rc, time::Instant};
+use std::{cell::RefCell, rc::Rc, time::Instant, sync::mpsc::{channel, Receiver, Sender}, path::PathBuf};
 
 use formosaic_engine::{
     architecture::{
-        models::{model_loader::ModelLoader, simple_model::SimpleModel},
+        models::{model_loader::{ModelLoadData, ModelLoader}, simple_model::SimpleModel},
         scene::{
             entity::simple_entity::SimpleEntity,
             node::node::NodeBehavior,
@@ -85,15 +85,20 @@ pub struct UiState {
     pub hint_warmth:   f32,
     pub is_solved:     bool,
     pub is_downloading: bool,
+    pub is_loading:    bool,
+    pub download_progress: Option<f32>,
     pub show_menu:     bool,
     pub is_touch:      bool,
     // ── Menu ─────────────────────────────────────────────────────────────
     pub levels:        Vec<LevelMeta>,
+    pub current_level: Option<LevelMeta>,
     // ── Events fired by UI back to game logic ────────────────────────────
     /// Key events queued by UiNode callbacks; drained by Formosaic::on_update.
     pub queued_events: Vec<formosaic_engine::input::Event>,
     /// Specific level ID to play — set by the Play button, drained by on_update.
     pub play_specific: Option<String>,
+    /// URL to open from credits.
+    pub open_url: Option<String>,
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -123,6 +128,13 @@ enum AppMode {
     LevelSelect,
     InGame  { level_id: String },
     Downloading { summary: ModelSummary },
+    Loading { level_id: String },
+}
+
+struct PendingLoad {
+    request_id: u64,
+    level_id: String,
+    data: ModelLoadData,
 }
 
 // ─── Main struct ──────────────────────────────────────────────────────────────
@@ -141,6 +153,12 @@ pub struct Formosaic {
     level_start:      Option<Instant>,
     registry:         LevelRegistry,
     client:           PolyPizzaClient,
+    load_seq:         u64,
+    loading_frames:   u32,
+    loading_started:  Option<Instant>,
+    load_tx:          Sender<(u64, String, ModelLoadData)>,
+    load_rx:          Receiver<(u64, String, ModelLoadData)>,
+    pending_load:     Option<PendingLoad>,
     mode:             AppMode,
     solved_timer:     f32,   // seconds since solve; transitions to menu after 5s
     /// Scene lighting config — passed to the pipeline each frame via GameFrameData.
@@ -153,6 +171,7 @@ impl Formosaic {
     pub fn new() -> Self {
         let data_dir = LevelRegistry::default_data_dir();
         let registry = LevelRegistry::load(&data_dir);
+        let (load_tx, load_rx) = channel();
         log::info!(
             "[Formosaic] Data dir: {}  ({} saved levels)",
             data_dir.display(),
@@ -167,6 +186,12 @@ impl Formosaic {
             elapsed_secs: 0.0, level_start: None,
             registry,
             client: PolyPizzaClient::new(),
+            load_seq: 0,
+            loading_frames: 0,
+            loading_started: None,
+            load_tx,
+            load_rx,
+            pending_load: None,
             mode: AppMode::LevelSelect,
             solved_timer: 0.0,
             scene_lights: LightConfig::default(),
@@ -175,10 +200,6 @@ impl Formosaic {
     }
 
     // ── Level loading ──────────────────────────────────────────────────────
-
-    fn load_model_and_start(&mut self, path: &str, level_id: &str, ctx: &mut SceneContext) {
-        self.load_model_from_bytes(path, level_id, None, ctx);
-    }
 
     fn load_model_from_bytes(&mut self, path: &str, level_id: &str, preloaded: Option<&[u8]>, ctx: &mut SceneContext) {
         // Clear scene then immediately re-register UiNodes — they live in the
@@ -189,6 +210,7 @@ impl Formosaic {
         self.entity = None;
         self.orbit  = None;
         self.hints.reset();
+        self.loading_started = None;
 
         let bytes = if let Some(b) = preloaded {
             b.to_vec()
@@ -201,15 +223,18 @@ impl Formosaic {
                 crate::asset_loader::load_3d_asset(path)
             }
         };
-        let model = ModelLoader::load_from_bytes_with_path(path, &bytes);
+        let hint = std::path::Path::new(path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("obj");
+        let data = ModelLoader::prepare_from_bytes(path, &bytes, hint);
+        self.finalize_loaded_model(level_id.to_string(), data, ctx);
+    }
 
-        // ── Entropy-based axis selection ───────────────────────────────────
-        let search = best_scramble_axis(
-            &model.borrow(),
-            ENTROPY_CANDIDATES,
-            TARGET_WORLD_RADIUS,
-            CAMERA_FOV,
-        );
+    fn finalize_loaded_model(&mut self, level_id: String, data: ModelLoadData, ctx: &mut SceneContext) {
+        let model = data.build();
+
+        let search = best_scramble_axis(&model.borrow(), ENTROPY_CANDIDATES, TARGET_WORLD_RADIUS, CAMERA_FOV);
         self.entropy_report = Some(search.report);
         log::info!(
             "[Formosaic] difficulty={} ({:.2})  entropy={:.2} bits  isolation={:.1}°",
@@ -219,7 +244,6 @@ impl Formosaic {
             search.report.solution_isolation_rad.to_degrees(),
         );
 
-        // Persist the real difficulty to the registry so the menu shows the correct label.
         if let Some(m) = self.registry.levels.iter_mut().find(|m| m.id == level_id) {
             m.difficulty = search.report.difficulty;
         }
@@ -229,39 +253,33 @@ impl Formosaic {
 
         if let Some(scene) = ctx.scene() {
             let entity = Rc::new(RefCell::new(SimpleEntity::new(model.clone())));
-
             let s = params.entity_scale;
             entity.borrow_mut().transform_mut().set_scale(Vector3::new(s, s, s));
             entity.borrow_mut().transform_mut().add_rotation_euler_world(0.0, 180.0, 0.0);
             entity.borrow_mut().transform_mut().set_position(Vector3::new(0.0, 0.0, 0.0));
 
-            let entity_rot   = entity.borrow().transform().rotation;
+            let entity_rot = entity.borrow().transform().rotation;
             let solution_dir = (entity_rot * search.axis).normalize();
-
             self.scramble_state = Some(ScrambleState { solution_dir, params });
-
             scene.add_node(entity.clone());
             self.entity = Some(entity.clone());
 
             let camera = ctx.camera();
-            let centroid  = entity.borrow().centroid();
-            let dist      = params.orbit_distance;
+            let centroid = entity.borrow().centroid();
+            let dist = params.orbit_distance;
             let (ctrl, sp) = make_scrambled_orbit(centroid, dist, solution_dir);
             camera.borrow_mut().transform.position = sp;
             self.orbit = Some(OrbitController::new(centroid, dist));
             camera.borrow_mut().set_controller(Some(Box::new(ctrl)));
         }
 
-        self.model        = Some(model);
-        self.game_state   = GameState::Playing;
-        self.level_start  = Some(Instant::now());
+        self.model = Some(model);
+        self.game_state = GameState::Playing;
+        self.level_start = Some(Instant::now());
         self.elapsed_secs = 0.0;
-        self.mode         = AppMode::InGame { level_id: level_id.to_string() };
+        self.mode = AppMode::InGame { level_id };
         self.solved_timer = 0.0;
-    }
-
-    fn load_builtin_cactus(&mut self, ctx: &mut SceneContext) {
-        self.load_model_and_start("models/Cactus/cactus.fbx", "cactus_builtin", ctx);
+        self.loading_started = None;
     }
 
     /// Ensure the builtin cactus level exists in the registry so it shows up
@@ -294,7 +312,7 @@ impl Formosaic {
             let path = self.registry.model_path(meta);
             let id   = meta.id.clone();
             if path.exists() {
-                self.load_model_and_start(path.to_string_lossy().as_ref(), &id, ctx);
+                self.begin_saved_level_load(id, path, ctx);
                 return;
             }
         }
@@ -310,6 +328,29 @@ impl Formosaic {
             self.client.fetch_explore_page(0, 20);
             log::info!("[Formosaic] Fetching poly.pizza random page");
         }
+    }
+
+    fn begin_saved_level_load(&mut self, level_id: String, path: PathBuf, ctx: &mut SceneContext) {
+        self.load_seq = self.load_seq.wrapping_add(1);
+        let request_id = self.load_seq;
+        self.mode = AppMode::Loading { level_id: level_id.clone() };
+        self.loading_frames = 0;
+        self.loading_started = Some(Instant::now());
+        self.model = None;
+        self.entity = None;
+        self.orbit = None;
+        self.scramble_state = None;
+        self.entropy_report = None;
+        self.hints.reset();
+        if let Some(scene) = ctx.scene() { scene.clear(); }
+        self.register_ui_nodes(ctx);
+        let tx = self.load_tx.clone();
+        std::thread::spawn(move || {
+            if let Ok(bytes) = std::fs::read(&path) {
+                let data = ModelLoader::prepare_from_bytes_with_path(path.to_string_lossy().as_ref(), &bytes);
+                let _ = tx.send((request_id, level_id, data));
+            }
+        });
     }
 
     // ── Puzzle ─────────────────────────────────────────────────────────────
@@ -418,7 +459,7 @@ impl Formosaic {
         let path = self.registry.model_path(&meta);
         // Pass the bytes we already have in memory — avoids re-reading from disk,
         // which would go through the JNI asset manager on Android and crash.
-        self.load_model_from_bytes(path.to_string_lossy().as_ref(), &meta.id, Some(&dl.bytes), ctx);
+        self.begin_preloaded_level_load(meta.id.clone(), path.to_string_lossy().into_owned(), dl.bytes, ctx);
 
         // Persist the entropy-derived difficulty now that analysis has run.
         if let Some(report) = self.entropy_report {
@@ -429,6 +470,27 @@ impl Formosaic {
                 let _ = std::fs::write(meta_path, m.to_json());
             }
         }
+    }
+
+    fn begin_preloaded_level_load(&mut self, level_id: String, path: String, bytes: Vec<u8>, ctx: &mut SceneContext) {
+        self.load_seq = self.load_seq.wrapping_add(1);
+        let request_id = self.load_seq;
+        self.mode = AppMode::Loading { level_id: level_id.clone() };
+        self.loading_frames = 0;
+        self.loading_started = Some(Instant::now());
+        self.model = None;
+        self.entity = None;
+        self.orbit = None;
+        self.scramble_state = None;
+        self.entropy_report = None;
+        self.hints.reset();
+        if let Some(scene) = ctx.scene() { scene.clear(); }
+        self.register_ui_nodes(ctx);
+        let tx = self.load_tx.clone();
+        std::thread::spawn(move || {
+            let data = ModelLoader::prepare_from_bytes_with_path(&path, &bytes);
+            let _ = tx.send((request_id, level_id, data));
+        });
     }
 
     // ── Public accessors (read by game_engine / pipeline) ──────────────
@@ -446,7 +508,7 @@ impl Formosaic {
 
     /// True when the level-select / menu overlay should be shown.
     pub fn is_in_menu(&self) -> bool {
-        matches!(self.mode, AppMode::LevelSelect)
+        matches!(self.mode, AppMode::LevelSelect | AppMode::Loading { .. })
     }
 
     /// Index of the currently highlighted level in the menu grid.
@@ -526,6 +588,74 @@ impl Formosaic {
                     });
             });
             scene.add_node(Rc::new(RefCell::new(hud)));
+        }
+
+        // ── Credits (after solve) ────────────────────────────────────────
+        {
+            let state = Rc::clone(&self.ui_state);
+            let credits = UiNode::new("credits", move |ui, w, h, _ctx| {
+                let s = state.borrow();
+                if s.show_menu || !s.is_solved { return; }
+                let Some(level) = &s.current_level else { return; };
+                let level_name = level.name.clone();
+                let level_author = level.author.clone();
+                let level_license = level.license.clone();
+                let level_source = level.source_url.clone();
+                drop(s);
+                let mut open_link = false;
+                let mut go_menu = false;
+                let _win_bg = ui.push_style_color(imgui::StyleColor::WindowBg, [0.03, 0.04, 0.06, 0.82]);
+                ui.window("##credits")
+                    .flags(WindowFlags::NO_DECORATION | WindowFlags::NO_MOVE | WindowFlags::NO_SAVED_SETTINGS)
+                    .position([w * 0.5, h * 0.5], Condition::Always)
+                    .position_pivot([0.5, 0.5])
+                    .size([
+                        (w - 48.0).clamp(320.0, 520.0),
+                        124.0,
+                    ], Condition::Always)
+                    .build(|| {
+                        ui.text_colored([0.85, 0.62, 0.18, 1.0], "Level Complete");
+                        ui.text_colored([0.88, 0.90, 0.96, 1.0], format!("{} by {}", level_name, level_author));
+                        ui.text_colored([0.50, 0.56, 0.68, 0.9], level_license);
+                        if ui.button("Open Artist Link") {
+                            open_link = true;
+                        }
+                        ui.same_line_with_spacing(0.0, 12.0);
+                        if ui.button("Back to Main Menu") {
+                            go_menu = true;
+                        }
+                    });
+                drop(_win_bg);
+                if open_link {
+                    state.borrow_mut().open_url = Some(level_source);
+                }
+                if go_menu {
+                    state.borrow_mut().queued_events.push(Event::KeyDown { key: Key::Escape });
+                }
+            });
+            scene.add_node(Rc::new(RefCell::new(credits)));
+        }
+
+        // ── Loading overlay (centered) ───────────────────────────────────
+        {
+            let state = Rc::clone(&self.ui_state);
+            let loading = UiNode::new("loading", move |ui, w, h, _ctx| {
+                let s = state.borrow();
+                if !s.is_loading { return; }
+                ui.window("##loading")
+                    .flags(WindowFlags::NO_DECORATION | WindowFlags::NO_MOVE | WindowFlags::NO_SAVED_SETTINGS | WindowFlags::NO_BACKGROUND | WindowFlags::NO_NAV | WindowFlags::NO_INPUTS)
+                    .position([w * 0.5, h * 0.5], Condition::Always)
+                    .position_pivot([0.5, 0.5])
+                    .size([360.0, 120.0], Condition::Always)
+                    .build(|| {
+                        ui.text_colored([0.85, 0.62, 0.18, 1.0], "Loading level...");
+                        ui.set_cursor_pos([18.0, 42.0]);
+                        let p = s.download_progress.unwrap_or(0.0);
+                        let label = if p > 0.0 { format!("{:.0}%", p * 100.0) } else { "Loading...".to_string() };
+                        imgui::ProgressBar::new(p).size([320.0, 18.0]).overlay_text(&label).build(ui);
+                    });
+            });
+            scene.add_node(Rc::new(RefCell::new(loading)));
         }
 
         // ── Hint warmth indicator (top-left, in-game only) ────────────────
@@ -639,6 +769,13 @@ impl Formosaic {
                                     ui.same_line_with_spacing(0.0, pad);
                                     ui.text_colored([0.4, 0.75, 1.0, 0.9], "Fetching...");
                                 }
+                                if let Some(p) = s.download_progress {
+                                    ui.same_line_with_spacing(0.0, pad);
+                                    imgui::ProgressBar::new(p)
+                                        .size([140.0, 10.0])
+                                        .overlay_text(&format!("{:.0}%", p * 100.0))
+                                        .build(ui);
+                                }
                             });
                             drop(_tok);
 
@@ -726,6 +863,14 @@ impl Formosaic {
                                     ui.same_line_with_spacing(0.0, pad);
                                     ui.set_cursor_pos([ui.cursor_pos()[0], (bar_h - 14.0) * 0.5]);
                                     ui.text_colored([0.4, 0.75, 1.0, 0.9], "Fetching...");
+                                }
+                                if let Some(p) = s.download_progress {
+                                    ui.same_line_with_spacing(0.0, pad);
+                                    ui.set_cursor_pos([ui.cursor_pos()[0], 5.0]);
+                                    imgui::ProgressBar::new(p)
+                                        .size([150.0, 10.0])
+                                        .overlay_text(&format!("{:.0}%", p * 100.0))
+                                        .build(ui);
                                 }
                                 // Buttons — right-aligned: [R] at far right, [N] left of it
                                 let btn_h_bar = bar_h - 4.0;
@@ -861,7 +1006,7 @@ impl Application for Formosaic {
             if let Some(meta) = self.registry.levels.iter().find(|m| m.id == id).cloned() {
                 let path = self.registry.model_path(&meta);
                 if path.exists() {
-                    self.load_model_and_start(path.to_string_lossy().as_ref(), &meta.id, ctx);
+                    self.begin_saved_level_load(meta.id.clone(), path, ctx);
                 }
             }
         }
@@ -869,6 +1014,23 @@ impl Application for Formosaic {
         // Drain any key events queued by UiNode callbacks.
         let queued: Vec<_> = self.ui_state.borrow_mut().queued_events.drain(..).collect();
         for ev in queued { self.on_event(&ev, ctx); }
+
+        if matches!(self.mode, AppMode::Loading { .. }) {
+            self.loading_frames = self.loading_frames.saturating_add(1);
+        }
+
+        if let Ok((request_id, level_id, data)) = self.load_rx.try_recv() {
+            self.pending_load = Some(PendingLoad { request_id, level_id, data });
+        }
+
+        if let Some(load) = self.pending_load.take() {
+            if load.request_id != self.load_seq || self.loading_frames == 0 {
+                self.pending_load = Some(load);
+            } else {
+                self.finalize_loaded_model(load.level_id, load.data, ctx);
+                self.loading_frames = 0;
+            }
+        }
 
         self.poll_client(ctx);
 
@@ -915,9 +1077,6 @@ impl Application for Formosaic {
             }
             GameState::Solved => {
                 self.solved_timer += delta_time;
-                if self.solved_timer >= 5.0 {
-                    self.mode = AppMode::LevelSelect;
-                }
             }
         }
 
@@ -991,10 +1150,25 @@ impl Application for Formosaic {
             ui.hint_tier      = self.hints.tier();
             ui.hint_warmth    = self.last_hint_output.as_ref().map(|o| o.warmth).unwrap_or(0.5);
             ui.is_solved      = self.game_state == GameState::Solved;
-            ui.is_downloading = self.is_downloading();
+            ui.is_downloading = matches!(self.mode, AppMode::Downloading { .. }) || self.client.is_download_pending();
+            ui.is_loading     = matches!(self.mode, AppMode::Loading { .. });
+            ui.download_progress = if ui.is_loading {
+                let t = self.loading_started.map(|start| start.elapsed().as_secs_f32()).unwrap_or(0.0);
+                Some((t / 2.0).clamp(0.05, 0.95))
+            } else if ui.is_downloading {
+                Some((self.client.download_progress_bytes() as f32 / 1_000_000.0).clamp(0.0, 0.95))
+            } else {
+                None
+            };
             ui.show_menu      = self.is_in_menu();
             ui.is_touch       = cfg!(target_os = "android");
             ui.levels         = self.registry.levels.clone();
+            ui.current_level  = match &self.mode {
+                AppMode::InGame { level_id } | AppMode::Loading { level_id } => {
+                    self.registry.levels.iter().find(|l| &l.id == level_id).cloned()
+                }
+                _ => None,
+            };
             // Don't clear queued_events here — on_update drains them.
         }
     }

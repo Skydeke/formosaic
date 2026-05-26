@@ -24,12 +24,118 @@ use crate::opengl::textures::texture::Texture;
 
 pub struct ModelLoader;
 
+#[derive(Clone, Debug)]
+pub struct PreparedMaterial {
+    pub diffuse_color: Vector4<f32>,
+    pub specular_color: Vector4<f32>,
+    pub ambient_color: Vector4<f32>,
+    pub emissive_color: Vector4<f32>,
+    pub metallic_factor: f32,
+    pub roughness_factor: f32,
+    pub diffuse_texture: Option<PreparedTexture>,
+    pub normal_texture: Option<PreparedTexture>,
+    pub metallic_roughness_texture: Option<PreparedTexture>,
+    pub emissive_texture: Option<PreparedTexture>,
+    pub occlusion_texture: Option<PreparedTexture>,
+    pub specular_texture: Option<PreparedTexture>,
+    pub cull_backface: bool,
+    pub alpha_mode: AlphaMode,
+    pub emissive_strength: f32,
+}
+
+#[derive(Clone, Debug)]
+pub struct PreparedTexture {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: Vec<u8>,
+}
+
+#[derive(Clone, Debug)]
+pub struct PreparedMesh {
+    pub positions: Vec<f32>,
+    pub normals: Vec<f32>,
+    pub texcoords: Vec<f32>,
+    pub indices: Vec<u32>,
+    pub colors: Vec<f32>,
+    pub material_index: usize,
+}
+
+/// CPU-side payload used while the loader parses bytes on a worker thread.
+#[derive(Clone, Debug)]
+pub struct ModelLoadData {
+    pub meshes: Vec<PreparedMesh>,
+    pub materials: Vec<PreparedMaterial>,
+    pub centroid: Option<Vector3<f32>>,
+    pub mesh_transforms: Vec<Matrix4<f32>>,
+    pub render_mode: RenderMode,
+}
+
+impl PreparedMaterial {
+    fn into_material(self) -> Material {
+        Material {
+            name: None,
+            diffuse_color: self.diffuse_color,
+            specular_color: self.specular_color,
+            ambient_color: self.ambient_color,
+            emissive_color: self.emissive_color,
+            transparent_color: Vector4::new(0.0, 0.0, 0.0, 0.0),
+            metallic_factor: self.metallic_factor,
+            roughness_factor: self.roughness_factor,
+            diffuse_texture: self.diffuse_texture.map(ModelLoader::upload_prepared_texture),
+            normal_texture: self.normal_texture.map(ModelLoader::upload_prepared_texture),
+            metallic_roughness_texture: self.metallic_roughness_texture.map(ModelLoader::upload_prepared_texture),
+            emissive_texture: self.emissive_texture.map(ModelLoader::upload_prepared_texture),
+            occlusion_texture: self.occlusion_texture.map(ModelLoader::upload_prepared_texture),
+            specular_texture: self.specular_texture.map(ModelLoader::upload_prepared_texture),
+            cull_backface: self.cull_backface,
+            alpha_mode: self.alpha_mode,
+            emissive_strength: self.emissive_strength,
+        }
+    }
+}
+
+impl ModelLoadData {
+    pub fn build(self) -> Rc<RefCell<SimpleModel>> {
+        let ModelLoadData { meshes, materials, centroid, mesh_transforms, render_mode } = self;
+        let meshes: Vec<Mesh> = meshes
+            .into_iter()
+            .map(|m| {
+                let mut mesh = Mesh::from_raw(m.positions, m.normals, m.texcoords, m.indices, m.colors);
+                if let Some(prepared) = materials.get(m.material_index) {
+                    mesh.set_material(prepared.clone().into_material());
+                }
+                mesh
+            })
+            .collect();
+
+        Rc::new(RefCell::new(SimpleModel::with_mesh_transforms(
+            meshes,
+            render_mode,
+            centroid,
+            mesh_transforms,
+        )))
+    }
+}
+
 impl ModelLoader {
     pub fn load_from_bytes(cache_key: &str, bytes: &[u8], hint: &str) -> Rc<RefCell<SimpleModel>> {
         if let Some(model) = ModelCache::get(cache_key) {
             return model;
         }
+        let model = Self::prepare_from_bytes(cache_key, bytes, hint).build();
+        ModelCache::insert(cache_key.to_string(), model.clone());
+        model
+    }
 
+    pub fn prepare_from_bytes_with_path(path: &str, bytes: &[u8]) -> ModelLoadData {
+        let hint = std::path::Path::new(path)
+            .extension()
+            .and_then(|e| e.to_str())
+            .unwrap_or("obj");
+        Self::prepare_from_bytes(path, bytes, hint)
+    }
+
+    pub fn prepare_from_bytes(cache_key: &str, bytes: &[u8], hint: &str) -> ModelLoadData {
         let scene = Scene::from_buffer(
             bytes,
             vec![
@@ -62,14 +168,14 @@ impl ModelLoader {
         let mut sum = Vector3::new(0.0f32, 0.0, 0.0);
         let mut count = 0usize;
 
-        let materials: Vec<Material> = scene.materials.iter().map(Self::process_material).collect();
+        let materials: Vec<PreparedMaterial> = scene.materials.iter().map(Self::process_material_prepared).collect();
 
         let mut mesh_transforms: Vec<Option<Matrix4<f32>>> = vec![None; scene.meshes.len()];
         if let Some(root) = &scene.root {
             Self::collect_node_transforms(root, Matrix4::from_scale(1.0), &mut mesh_transforms);
         }
 
-        let meshes: Vec<Mesh> = scene
+        let meshes: Vec<PreparedMesh> = scene
             .meshes
             .iter()
             .map(|m| {
@@ -77,12 +183,7 @@ impl ModelLoader {
                     sum += Vector3::new(v.x, v.y, v.z);
                     count += 1;
                 }
-                let mut mesh = Self::process_mesh(m);
-                let idx = m.material_index as usize;
-                if idx < materials.len() {
-                    mesh.set_material(materials[idx].clone());
-                }
-                mesh
+                Self::process_mesh_prepared(m)
             })
             .collect();
 
@@ -97,28 +198,18 @@ impl ModelLoader {
             .map(|m| m.unwrap_or_else(|| Matrix4::from_scale(1.0)))
             .collect();
 
-        let model = Rc::new(RefCell::new(SimpleModel::with_mesh_transforms(
+        ModelLoadData {
             meshes,
-            RenderMode::Triangles,
-            Some(centroid),
+            materials,
+            centroid: Some(centroid),
             mesh_transforms,
-        )));
-
-        ModelCache::insert(cache_key.to_string(), model.clone());
-        model
-    }
-
-    pub fn load_from_bytes_with_path(path: &str, bytes: &[u8]) -> Rc<RefCell<SimpleModel>> {
-        let hint = std::path::Path::new(path)
-            .extension()
-            .and_then(|e| e.to_str())
-            .unwrap_or("obj");
-        Self::load_from_bytes(path, bytes, hint)
+            render_mode: RenderMode::Triangles,
+        }
     }
 
     // ── Texture conversion ────────────────────────────────────────────────────
 
-    fn convert_texture(tex: &russimp_ng::material::Texture) -> Option<Rc<dyn Texture>> {
+    fn convert_texture(tex: &russimp_ng::material::Texture) -> Option<PreparedTexture> {
         use image::ImageFormat;
         use std::io::Cursor;
 
@@ -139,9 +230,11 @@ impl ModelLoader {
                         return None;
                     }
 
-                    return Some(Rc::new(Self::upload_rgba_texture(
-                        tex.width, tex.height, bytes,
-                    )));
+                    return Some(PreparedTexture {
+                        width: tex.width,
+                        height: tex.height,
+                        rgba: bytes.to_vec(),
+                    });
                 }
 
                 // Compressed embedded image
@@ -166,11 +259,11 @@ impl ModelLoader {
 
                 let img = decoded.into_rgba8();
 
-                Some(Rc::new(Self::upload_rgba_texture(
-                    img.width(),
-                    img.height(),
-                    &img.into_raw(),
-                )))
+                Some(PreparedTexture {
+                    width: img.width(),
+                    height: img.height(),
+                    rgba: img.into_raw(),
+                })
             }
 
             russimp_ng::material::DataContent::Texel(texels) => {
@@ -183,11 +276,17 @@ impl ModelLoader {
                     rgba.push(t.a);
                 }
 
-                Some(Rc::new(Self::upload_rgba_texture(
-                    tex.width, tex.height, &rgba,
-                )))
+                Some(PreparedTexture {
+                    width: tex.width,
+                    height: tex.height,
+                    rgba,
+                })
             }
         }
+    }
+
+    fn upload_prepared_texture(tex: PreparedTexture) -> Rc<dyn Texture> {
+        Rc::new(Self::upload_rgba_texture(tex.width, tex.height, &tex.rgba))
     }
 
     /// Upload raw RGBA bytes as GL_TEXTURE_2D and return a SimpleTexture.
@@ -282,6 +381,51 @@ impl ModelLoader {
         );
 
         Mesh::from_raw(positions, normals, texcoords, indices, colors)
+    }
+
+    fn process_mesh_prepared(ai_mesh: &AiMesh) -> PreparedMesh {
+        let mut positions = Vec::new();
+        let mut normals = Vec::new();
+        let mut texcoords = Vec::new();
+        let mut indices = Vec::new();
+        let mut colors = Vec::new();
+
+        for v in &ai_mesh.vertices {
+            positions.extend_from_slice(&[v.x, v.y, v.z]);
+        }
+        for n in &ai_mesh.normals {
+            normals.extend_from_slice(&[n.x, n.y, n.z]);
+        }
+        if let Some(Some(coords)) = ai_mesh.texture_coords.first() {
+            if coords.len() == ai_mesh.vertices.len() {
+                for t in coords.iter() {
+                    texcoords.push(t.x);
+                    texcoords.push(t.y);
+                }
+            }
+        }
+        for f in &ai_mesh.faces {
+            for idx in &f.0 {
+                indices.push(*idx as u32);
+            }
+        }
+        if let Some(Some(chan)) = ai_mesh.colors.first() {
+            for c in chan.iter() {
+                colors.push(c.r);
+                colors.push(c.g);
+                colors.push(c.b);
+                colors.push(c.a);
+            }
+        }
+
+        PreparedMesh {
+            positions,
+            normals,
+            texcoords,
+            indices,
+            colors,
+            material_index: ai_mesh.material_index as usize,
+        }
     }
 
     fn ai_matrix_to_cg(matrix: &russimp_ng::Matrix4x4) -> Matrix4<f32> {
@@ -458,8 +602,134 @@ impl ModelLoader {
         mat
     }
 
+    fn process_material_prepared(ai_material: &AiMaterial) -> PreparedMaterial {
+        let mut mat = Material::default();
+
+        for prop in &ai_material.properties {
+            match prop.key.as_str() {
+                "$clr.diffuse" | "$clr.base" => {
+                    if let PropertyTypeInfo::FloatArray(v) = &prop.data {
+                        if v.len() >= 3 {
+                            let a = if v.len() >= 4 { v[3] } else { 1.0 };
+                            mat.diffuse_color = Vector4::new(v[0], v[1], v[2], a);
+                        }
+                    }
+                }
+                "$clr.specular" => {
+                    if let PropertyTypeInfo::FloatArray(v) = &prop.data {
+                        if v.len() >= 3 {
+                            mat.specular_color = Vector4::new(v[0], v[1], v[2], 1.0);
+                        }
+                    }
+                }
+                "$clr.ambient" => {
+                    if let PropertyTypeInfo::FloatArray(v) = &prop.data {
+                        if v.len() >= 3 {
+                            mat.ambient_color = Vector4::new(v[0], v[1], v[2], 1.0);
+                        }
+                    }
+                }
+                "$clr.emissive" => {
+                    if let PropertyTypeInfo::FloatArray(v) = &prop.data {
+                        if v.len() >= 3 {
+                            mat.emissive_color = Vector4::new(v[0], v[1], v[2], 1.0);
+                        }
+                    }
+                }
+                "$mat.gltf.pbrMetallicRoughness.metallicFactor" => {
+                    if let PropertyTypeInfo::FloatArray(v) = &prop.data {
+                        if !v.is_empty() { mat.metallic_factor = v[0]; }
+                    }
+                }
+                "$mat.gltf.pbrMetallicRoughness.roughnessFactor" => {
+                    if let PropertyTypeInfo::FloatArray(v) = &prop.data {
+                        if !v.is_empty() { mat.roughness_factor = v[0]; }
+                    }
+                }
+                "$mat.gltf.emissiveStrength" => {
+                    if let PropertyTypeInfo::FloatArray(v) = &prop.data {
+                        if !v.is_empty() { mat.emissive_strength = v[0]; }
+                    }
+                }
+                "$mat.opacity" => {
+                    if let PropertyTypeInfo::FloatArray(v) = &prop.data {
+                        if !v.is_empty() {
+                            mat.diffuse_color.w = v[0];
+                            if v[0] < 0.999 && matches!(mat.alpha_mode, AlphaMode::Opaque) {
+                                mat.alpha_mode = AlphaMode::Blend;
+                            }
+                        }
+                    }
+                }
+                "$mat.gltf.alphaMode" => {
+                    if let PropertyTypeInfo::String(s) = &prop.data {
+                        mat.alpha_mode = match s.as_str() {
+                            "MASK" => AlphaMode::Mask(0.5),
+                            "BLEND" => AlphaMode::Blend,
+                            _ => AlphaMode::Opaque,
+                        };
+                    }
+                }
+                "$mat.gltf.alphaCutoff" => {
+                    if let PropertyTypeInfo::FloatArray(v) = &prop.data {
+                        if !v.is_empty() { mat.alpha_mode = AlphaMode::Mask(v[0]); }
+                    }
+                }
+                "$mat.twosided" | "$mat.twoSided" | "$mat.two_sided" => {
+                    match &prop.data {
+                        PropertyTypeInfo::IntegerArray(v) => {
+                            if !v.is_empty() { mat.cull_backface = v[0] == 0; }
+                        }
+                        PropertyTypeInfo::FloatArray(v) => {
+                            if !v.is_empty() { mat.cull_backface = v[0] == 0.0; }
+                        }
+                        PropertyTypeInfo::String(s) => {
+                            mat.cull_backface = s != "true" && s != "1";
+                        }
+                        _ => {}
+                    }
+                }
+                _ => {}
+            }
+        }
+
+        PreparedMaterial {
+            diffuse_color: mat.diffuse_color,
+            specular_color: mat.specular_color,
+            ambient_color: mat.ambient_color,
+            emissive_color: mat.emissive_color,
+            metallic_factor: mat.metallic_factor,
+            roughness_factor: mat.roughness_factor,
+            diffuse_texture: Self::load_tex_prepared(ai_material, TextureType::BaseColor)
+                .or_else(|| Self::load_tex_prepared(ai_material, TextureType::Diffuse)),
+            normal_texture: Self::load_tex_prepared(ai_material, TextureType::Normals)
+                .or_else(|| Self::load_tex_prepared(ai_material, TextureType::Height)),
+            metallic_roughness_texture: Self::load_tex_prepared(ai_material, TextureType::Unknown)
+                .or_else(|| Self::load_tex_prepared(ai_material, TextureType::Metalness))
+                .or_else(|| Self::load_tex_prepared(ai_material, TextureType::Roughness)),
+            emissive_texture: Self::load_tex_prepared(ai_material, TextureType::Emissive),
+            occlusion_texture: Self::load_tex_prepared(ai_material, TextureType::LightMap)
+                .or_else(|| Self::load_tex_prepared(ai_material, TextureType::AmbientOcclusion)),
+            specular_texture: Self::load_tex_prepared(ai_material, TextureType::Specular)
+                .or_else(|| Self::load_tex_prepared(ai_material, TextureType::Shininess)),
+            cull_backface: mat.cull_backface,
+            alpha_mode: mat.alpha_mode,
+            emissive_strength: mat.emissive_strength,
+        }
+    }
+
     /// Try to load a texture of a given type from this material.
     fn load_tex(mat: &AiMaterial, ty: TextureType) -> Option<Rc<dyn Texture>> {
+        let tex_ref = mat.textures.get(&ty)?;
+        let tex = tex_ref.borrow();
+        let result = Self::convert_texture(&tex);
+        if result.is_none() {
+            log::warn!("[ModelLoader] failed to convert {:?} texture", ty);
+        }
+        result.map(|tex| Rc::new(Self::upload_rgba_texture(tex.width, tex.height, &tex.rgba)) as Rc<dyn Texture>)
+    }
+
+    fn load_tex_prepared(mat: &AiMaterial, ty: TextureType) -> Option<PreparedTexture> {
         let tex_ref = mat.textures.get(&ty)?;
         let tex = tex_ref.borrow();
         let result = Self::convert_texture(&tex);

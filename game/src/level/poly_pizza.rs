@@ -17,6 +17,7 @@
 //! Results are polled each frame via `try_recv`.
 
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
 
 const API_BASE: &str = "https://api.poly.pizza/v1.1";
 
@@ -65,6 +66,14 @@ pub struct ModelDownload {
 pub type ExploreResult = Result<Vec<ModelSummary>, String>;
 pub type DownloadResult = Result<ModelDownload, String>;
 
+#[derive(Debug, Clone)]
+pub struct DownloadProgress {
+    pub downloaded_bytes: usize,
+    pub total_bytes: Option<usize>,
+}
+
+pub type DownloadProgressResult = Result<DownloadProgress, String>;
+
 // ─── Client ──────────────────────────────────────────────────────────────────
 
 pub struct PolyPizzaClient {
@@ -72,21 +81,28 @@ pub struct PolyPizzaClient {
     explore_rx: Receiver<ExploreResult>,
     download_tx: Sender<DownloadResult>,
     download_rx: Receiver<DownloadResult>,
+    progress_tx: Sender<DownloadProgressResult>,
+    progress_rx: Receiver<DownloadProgressResult>,
     explore_pending: bool,
     download_pending: bool,
+    progress_state: Option<Arc<AtomicUsize>>,
 }
 
 impl PolyPizzaClient {
     pub fn new() -> Self {
         let (etx, erx) = channel();
         let (dtx, drx) = channel();
+        let (ptx, prx) = channel();
         Self {
             explore_tx: etx,
             explore_rx: erx,
             download_tx: dtx,
             download_rx: drx,
+            progress_tx: ptx,
+            progress_rx: prx,
             explore_pending: false,
             download_pending: false,
+            progress_state: None,
         }
     }
 
@@ -119,7 +135,10 @@ impl PolyPizzaClient {
             return;
         }
         self.download_pending = true;
+        let progress = Arc::new(AtomicUsize::new(0));
+        self.progress_state = Some(progress.clone());
         let tx  = self.download_tx.clone();
+        let ptx = self.progress_tx.clone();
         let id  = summary.id.clone();
         let nm  = summary.name.clone();
         let au  = summary.author.clone();
@@ -127,7 +146,7 @@ impl PolyPizzaClient {
         let su  = summary.source_url.clone();
         let dl  = summary.download_url.clone();   // pre-known CDN URL if available
         std::thread::spawn(move || {
-            let _ = tx.send(do_download(&id, &nm, &au, &li, &su, &dl));
+            let _ = tx.send(do_download(&id, &nm, &au, &li, &su, &dl, Some((ptx, progress))));
         });
     }
 
@@ -136,10 +155,20 @@ impl PolyPizzaClient {
         match self.download_rx.try_recv() {
             Ok(r) => {
                 self.download_pending = false;
+                self.progress_state = None;
                 Some(r)
             }
             Err(_) => None,
         }
+    }
+
+    pub fn clear_download_progress(&mut self) {
+        self.progress_state = None;
+        while self.progress_rx.try_recv().is_ok() {}
+    }
+
+    pub fn poll_download_progress(&mut self) -> Option<DownloadProgressResult> {
+        self.progress_rx.try_recv().ok()
     }
 
     pub fn is_explore_pending(&self) -> bool {
@@ -147,6 +176,10 @@ impl PolyPizzaClient {
     }
     pub fn is_download_pending(&self) -> bool {
         self.download_pending
+    }
+
+    pub fn download_progress_bytes(&self) -> usize {
+        self.progress_state.as_ref().map(|p| p.load(Ordering::Relaxed)).unwrap_or(0)
     }
 }
 
@@ -235,7 +268,7 @@ fn fetch_explore(_offset: usize, limit: usize) -> ExploreResult {
 
 /// Download a model: use `known_dl_url` if non-empty (it comes from the search
 /// response `Download` field), otherwise fetch the model detail endpoint to get it.
-fn do_download(id: &str, name: &str, author: &str, license: &str, src: &str, known_dl_url: &str) -> DownloadResult {
+fn do_download(id: &str, name: &str, author: &str, license: &str, src: &str, known_dl_url: &str, progress: Option<(Sender<DownloadProgressResult>, Arc<AtomicUsize>)>) -> DownloadResult {
     // Fast path: search response already gave us the CDN URL
     let (dl_url, ext) = if !known_dl_url.is_empty() && (known_dl_url.contains(".glb") || known_dl_url.contains(".fbx")) {
         log::info!("[PolyPizza] Using inline download URL for '{}': {}", id, known_dl_url);
@@ -253,7 +286,12 @@ fn do_download(id: &str, name: &str, author: &str, license: &str, src: &str, kno
     };
 
     log::info!("[PolyPizza] Downloading '{}' from {}", name, dl_url);
-    let bytes = authed_get_bytes(&dl_url)?;
+    let bytes = if let Some((ptx, progress)) = &progress {
+        let result = authed_get_bytes_with_progress(&dl_url, Some((ptx.clone(), progress.clone())))?;
+        result
+    } else {
+        authed_get_bytes(&dl_url)?
+    };
     log::info!("[PolyPizza] Downloaded {} bytes for '{}'", bytes.len(), name);
 
     Ok(ModelDownload {
@@ -265,6 +303,29 @@ fn do_download(id: &str, name: &str, author: &str, license: &str, src: &str, kno
         file_ext:   ext,
         bytes,
     })
+}
+
+fn authed_get_bytes_with_progress(url: &str, progress: Option<(Sender<DownloadProgressResult>, Arc<AtomicUsize>)>) -> Result<Vec<u8>, String> {
+    let resp = ureq::get(url)
+        .call()
+        .map_err(|e| format!("GET {}: {}", url, e))?;
+    let total = resp
+        .header("Content-Length")
+        .and_then(|s| s.parse::<usize>().ok());
+    let mut reader = resp.into_reader();
+    let mut buf = Vec::new();
+    let mut chunk = [0u8; 16 * 1024];
+    loop {
+        let n = std::io::Read::read(&mut reader, &mut chunk)
+            .map_err(|e| format!("read body {}: {}", url, e))?;
+        if n == 0 { break; }
+        buf.extend_from_slice(&chunk[..n]);
+        if let Some((ptx, state)) = &progress {
+            state.store(buf.len(), Ordering::Relaxed);
+            let _ = ptx.send(Ok(DownloadProgress { downloaded_bytes: buf.len(), total_bytes: total }));
+        }
+    }
+    Ok(buf)
 }
 
 // ─── JSON parsing (no serde dependency) ──────────────────────────────────────
@@ -471,6 +532,3 @@ fn unescape(s: &str) -> String {
         .replace("\\r", "\r")
         .replace("\\t", "\t")
 }
-
-// ─── Trait impl needed by ureq's read_to_end ─────────────────────────────────
-use std::io::Read;
