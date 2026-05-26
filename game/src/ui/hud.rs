@@ -26,6 +26,16 @@ pub fn register(scene: &Scenegraph, state: Rc<RefCell<UiState>>) {
                 if s.is_solved      { ui.text_colored([0.2, 0.9, 0.5, 1.0], "SOLVED!"); }
                 if s.is_downloading { ui.text_colored([0.4, 0.7, 1.0, 0.8], "Fetching..."); }
             });
+
+        if !s.is_touch {
+            ui.window("##keyinfo")
+                .flags(util::hud_flags())
+                .position([w * 0.5, h - scale.pad_w()], Condition::Always)
+                .position_pivot([0.5, 1.0])
+                .build(|| {
+                    util::text_muted(ui, "ESC  Menu    H  Hint");
+                });
+        }
     });
     scene.add_node(Rc::new(RefCell::new(hud)));
 }

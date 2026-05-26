@@ -644,12 +644,28 @@ fn smoothstep(t: f32) -> f32 {
 impl Application for Formosaic {
     fn on_init(&mut self, ctx: &mut SceneContext) {
         log::info!("[Formosaic] on_init");
-        // Seed the builtin cactus into the registry so it appears in the menu
-        // grid on first run (no-op if already saved).
         self.seed_builtin_levels();
-        // Register UI nodes and open the level-select menu.
         self.register_ui_nodes(ctx);
-        // mode is already AppMode::LevelSelect from Self::new().
+
+        // On resume after GL context loss, re-load the current level so
+        // fresh GPU resources (VAOs, textures) are created for the new context.
+        let resume_level_id = match &self.mode {
+            AppMode::InGame { level_id }
+            | AppMode::Loading { level_id }
+            | AppMode::Building { level_id } => Some(level_id.clone()),
+            _ => None,
+        };
+        if matches!(self.mode, AppMode::Downloading { .. }) {
+            self.mode = AppMode::LevelSelect;
+        }
+        if let Some(id) = resume_level_id {
+            if let Some(meta) = self.registry.levels.iter().find(|m| m.id == id).cloned() {
+                let path = self.registry.model_path(&meta);
+                if path.exists() {
+                    self.begin_saved_level_load(meta.id.clone(), path, ctx);
+                }
+            }
+        }
     }
 
     fn on_update(&mut self, delta_time: f32, ctx: &mut SceneContext) {
