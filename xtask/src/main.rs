@@ -57,7 +57,7 @@ fn cmdline_tools(workspace: &Path) -> PathBuf {
     sdk_dir(workspace).join("cmdline-tools/latest")
 }
 
-const NDK_VERSION:       &str = "25.2.9519653";
+const NDK_VERSION:       &str = "27.2.12479018";
 const CMDLINE_TOOLS_URL: &str =
     "https://dl.google.com/android/repository/commandlinetools-linux-9477386_latest.zip";
 
@@ -170,9 +170,11 @@ fn cargo_apk(workspace: &Path, apk_args: &[&str]) {
     let ndk      = ndk_home(workspace);
     let sdk      = sdk_dir(workspace);
     let toolchain = ndk.join("toolchains/llvm/prebuilt/linux-x86_64/bin");
+    let ranlib   = toolchain.join("llvm-ranlib");
 
     let bindgen_aarch64 = bindgen_args(&ndk, "aarch64-linux-android");
     let bindgen_armv7   = bindgen_args(&ndk, "arm-linux-androideabi");
+    let android_cflags  = "-w -D_FILE_OFFSET_BITS=64 -D_LARGEFILE64_SOURCE=1 -Dfopen64=fopen -Dftello64=ftell -Dfseeko64=fseek";
 
     let mut cmd = Command::new("cargo");
     cmd.arg("apk").args(apk_args).current_dir(workspace);
@@ -188,10 +190,20 @@ fn cargo_apk(workspace: &Path, apk_args: &[&str]) {
         orig_path,
     ));
 
-    cmd.env("CFLAGS_aarch64_linux_android",   "-w");
-    cmd.env("CXXFLAGS_aarch64_linux_android", "-w");
+    cmd.env("CFLAGS_aarch64_linux_android",   android_cflags);
+    cmd.env("CXXFLAGS_aarch64_linux_android", android_cflags);
+    cmd.env("CFLAGS_armv7_linux_androideabi",  android_cflags);
+    cmd.env("CXXFLAGS_armv7_linux_androideabi", android_cflags);
+    cmd.env("CFLAGS_i686_linux_android",       android_cflags);
+    cmd.env("CXXFLAGS_i686_linux_android",     android_cflags);
+    cmd.env("CFLAGS_x86_64_linux_android",     android_cflags);
+    cmd.env("CXXFLAGS_x86_64_linux_android",   android_cflags);
     cmd.env("BINDGEN_EXTRA_CLANG_ARGS_aarch64_linux_android",   &bindgen_aarch64);
     cmd.env("BINDGEN_EXTRA_CLANG_ARGS_armv7_linux_androideabi", &bindgen_armv7);
+    cmd.env("RANLIB_aarch64_linux_android", &ranlib);
+    cmd.env("RANLIB_armv7_linux_androideabi", &ranlib);
+    cmd.env("RANLIB_i686_linux_android", &ranlib);
+    cmd.env("RANLIB_x86_64_linux_android", &ranlib);
 
     let status = cmd.status().unwrap_or_else(|e| {
         eprintln!("Failed to run cargo apk: {e}");

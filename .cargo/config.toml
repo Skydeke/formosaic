@@ -50,5 +50,5 @@ clean-all               = "run -p xtask -- clean-all"
 # by xtask at runtime, not here, because it requires derived absolute paths.
 [env]
 ANDROID_HOME     = { value = ".android/sdk",                  relative = true, force = false }
-ANDROID_NDK_HOME = { value = ".android/sdk/ndk/25.2.9519653", relative = true, force = false }
-ANDROID_NDK_ROOT = { value = ".android/sdk/ndk/25.2.9519653", relative = true, force = false }
+ANDROID_NDK_HOME = { value = ".android/sdk/ndk/27.2.12479018", relative = true, force = false }
+ANDROID_NDK_ROOT = { value = ".android/sdk/ndk/27.2.12479018", relative = true, force = false }
