@@ -461,6 +461,7 @@ impl Formosaic {
         camera.borrow_mut().set_controller(Some(Box::new(post)));
         self.game_state = GameState::Solved;
         self.solved_timer = 0.0;
+        self.hints.reset();
 
         let level_id = match &self.mode {
             AppMode::InGame { level_id } => level_id.clone(),
