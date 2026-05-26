@@ -3,17 +3,17 @@ use formosaic_engine::architecture::scene::node::{ui_node::UiNode, scenegraph::S
 use formosaic_engine::input::{Event, Key};
 use imgui::*;
 use crate::formosaic::UiState;
+use super::util::Scale;
 
 pub fn register(scene: &Scenegraph, state: Rc<RefCell<UiState>>) {
     let touch = UiNode::new("touch_buttons", move |ui, w, h, _ctx| {
         let s = state.borrow();
         if s.show_menu { return; }
-        let btn_h  = (h * 0.08).max(52.0);
-        let margin = (w * 0.02).max(8.0);
+        let scale = Scale::from_screen(w, h, s.is_touch);
+        let btn_h  = (h * 0.08).max(scale.btn_h());
+        let margin = scale.pad_w();
         let btn_w  = (w - margin * 3.0) * 0.5;
-        let win_y  = h - btn_h - 80.0;
-        let win_w  = w;
-        let win_h  = btn_h;
+        let win_y  = h - btn_h - scale.su(80.0);
 
         let mut hint_clicked = false;
         let mut menu_clicked = false;
@@ -21,7 +21,7 @@ pub fn register(scene: &Scenegraph, state: Rc<RefCell<UiState>>) {
             .flags(WindowFlags::NO_DECORATION | WindowFlags::NO_MOVE
                  | WindowFlags::NO_BACKGROUND | WindowFlags::NO_SAVED_SETTINGS)
             .position([0.0, win_y], Condition::Always)
-            .size([win_w, win_h], Condition::Always)
+            .size([w, btn_h], Condition::Always)
             .build(|| {
                 ui.set_cursor_pos([margin, 0.0]);
                 hint_clicked = ui.button_with_size("HINT", [btn_w, btn_h]);

@@ -3,12 +3,14 @@ use formosaic_engine::architecture::scene::node::{ui_node::UiNode, scenegraph::S
 use formosaic_engine::input::{Event, Key};
 use imgui::*;
 use crate::formosaic::UiState;
+use super::util::{Scale, self as util};
 
 pub fn register(scene: &Scenegraph, state: Rc<RefCell<UiState>>) {
     let credits = UiNode::new("credits", move |ui, w, h, _ctx| {
         let s = state.borrow();
         if s.show_menu || !s.is_solved { return; }
         let Some(level) = &s.current_level else { return; };
+        let scale = Scale::from_screen(w, h, s.is_touch);
         let level_name = level.name.clone();
         let level_author = level.author.clone();
         let level_license = level.license.clone();
@@ -16,34 +18,34 @@ pub fn register(scene: &Scenegraph, state: Rc<RefCell<UiState>>) {
         drop(s);
         let mut open_link = false;
         let mut go_menu = false;
-        let _win_bg = ui.push_style_color(imgui::StyleColor::WindowBg, [0.03, 0.04, 0.06, 0.82]);
+
+        let pw = (w * 0.60).clamp(scale.su(320.0), scale.su(480.0));
+        let inner_w = pw - scale.pad_w() * 2.0;
+
+        let _wp = ui.push_style_var(imgui::StyleVar::WindowPadding([scale.pad_w(), scale.pad_w()]));
+        let _win_bg = ui.push_style_color(imgui::StyleColor::WindowBg, [0.03, 0.04, 0.06, 0.92]);
         ui.window("##credits")
-            .flags(WindowFlags::NO_DECORATION | WindowFlags::NO_MOVE | WindowFlags::NO_SAVED_SETTINGS)
+            .flags(util::popup_flags())
             .position([w * 0.5, h * 0.5], Condition::Always)
             .position_pivot([0.5, 0.5])
-            .size([
-                (w - 48.0).clamp(320.0, 520.0),
-                124.0,
-            ], Condition::Always)
             .build(|| {
-                ui.text_colored([0.85, 0.62, 0.18, 1.0], "Level Complete");
-                ui.text_colored([0.88, 0.90, 0.96, 1.0], format!("{} by {}", level_name, level_author));
-                ui.text_colored([0.50, 0.56, 0.68, 0.9], level_license);
-                if ui.button("Open Artist Link") {
-                    open_link = true;
-                }
-                ui.same_line_with_spacing(0.0, 12.0);
-                if ui.button("Back to Main Menu") {
-                    go_menu = true;
-                }
+                util::title(ui, "Level Complete");
+                util::gap(ui, scale.gap_md());
+                util::text_body(ui, &level_name);
+                util::text_muted(ui, &format!("by {}", level_author));
+                util::gap(ui, scale.gap_xxs());
+                util::text_muted(ui, &level_license);
+                util::gap(ui, scale.gap_md());
+                util::separator_dim(ui);
+                util::gap(ui, scale.gap_sm());
+                scale.btn_full(ui, "Open Artist Link", inner_w, &mut open_link);
+                util::gap(ui, scale.gap_sm());
+                scale.btn_full(ui, "Back to Main Menu", inner_w, &mut go_menu);
             });
         drop(_win_bg);
-        if open_link {
-            state.borrow_mut().open_url = Some(level_source);
-        }
-        if go_menu {
-            state.borrow_mut().queued_events.push(Event::KeyDown { key: Key::Escape });
-        }
+        drop(_wp);
+        if open_link { state.borrow_mut().open_url = Some(level_source); }
+        if go_menu { state.borrow_mut().queued_events.push(Event::KeyDown { key: Key::Escape }); }
     });
     scene.add_node(Rc::new(RefCell::new(credits)));
 }
