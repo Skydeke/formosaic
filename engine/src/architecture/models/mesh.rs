@@ -180,9 +180,6 @@ impl Mesh {
         max_disp: f32,
         mesh_transform: Matrix4<f32>,
     ) {
-        use cgmath::InnerSpace;
-        use rand::Rng;
-
         let pos_buffer = match &self.pos_buffer {
             Some(b) => b.clone(),
             None => {
@@ -193,31 +190,10 @@ impl Mesh {
 
         if self.positions.is_empty() { return; }
 
-        let axis = axis.normalize();
-        let basis = Matrix3::new(
-            mesh_transform.x.x, mesh_transform.x.y, mesh_transform.x.z,
-            mesh_transform.y.x, mesh_transform.y.y, mesh_transform.y.z,
-            mesh_transform.z.x, mesh_transform.z.y, mesh_transform.z.z,
+        self.scramble_offsets = compute_scramble_offsets(
+            self.positions.len(),
+            axis, min_disp, max_disp, mesh_transform,
         );
-        let inv_basis = basis.invert().unwrap_or(Matrix3::from_scale(1.0));
-        let mut rng = rand::rng();
-        let n = self.positions.len();
-        let mut offsets = vec![0.0f32; n];
-
-        let tri_count = n / 9;
-        for tri in 0..tri_count {
-            let amount: f32 = rng.random_range(min_disp..max_disp);
-            let disp = inv_basis * (axis * amount);
-            let base = tri * 9;
-            for corner in 0..3 {
-                let v = base + corner * 3;
-                offsets[v]     = disp.x;
-                offsets[v + 1] = disp.y;
-                offsets[v + 2] = disp.z;
-            }
-        }
-
-        self.scramble_offsets = offsets;
         self.upload_at_t(1.0, &pos_buffer);
     }
 
@@ -273,4 +249,66 @@ impl Renderable for Mesh {
 
 impl Mesh {
     pub fn unbind(&self) { self.vao.unbind(); }
+
+    pub fn scramble_offsets(&self) -> &[f32] { &self.scramble_offsets }
 }
+
+/// Compute per-vertex scramble offsets for a triangle mesh.
+///
+/// Each triangle's three vertices receive the *same* random displacement
+/// along `axis` (transformed into the mesh's local frame), with magnitude
+/// in `[min_disp, max_disp]`.
+///
+/// `vertex_count` = total number of float values (vertices × 3).
+/// `mesh_transform` = the mesh's local-to-model transform — the axis is
+/// rotated into mesh-local space so the displacement follows the original
+/// geometry regardless of node-hierarchy transforms applied during loading.
+pub fn compute_scramble_offsets(
+    vertex_count: usize,
+    axis: Vector3<f32>,
+    min_disp: f32,
+    max_disp: f32,
+    mesh_transform: Matrix4<f32>,
+) -> Vec<f32> {
+    use cgmath::InnerSpace;
+    use rand::Rng;
+
+    if vertex_count == 0 { return vec![]; }
+
+    let axis = axis.normalize();
+    let basis = Matrix3::new(
+        mesh_transform.x.x, mesh_transform.x.y, mesh_transform.x.z,
+        mesh_transform.y.x, mesh_transform.y.y, mesh_transform.y.z,
+        mesh_transform.z.x, mesh_transform.z.y, mesh_transform.z.z,
+    );
+    let inv_basis = basis.invert().unwrap_or(Matrix3::from_scale(1.0));
+    let mut rng = rand::rng();
+    let mut offsets = vec![0.0f32; vertex_count];
+
+    let tri_count = vertex_count / 9;
+    for tri in 0..tri_count {
+        let amount: f32 = rng.random_range(min_disp..max_disp);
+        let disp = inv_basis * (axis * amount);
+        let base = tri * 9;
+        for corner in 0..3 {
+            let v = base + corner * 3;
+            offsets[v]     = disp.x;
+            offsets[v + 1] = disp.y;
+            offsets[v + 2] = disp.z;
+        }
+    }
+    offsets
+}
+
+/// Apply the lerp formula `positions[i] + offsets[i] * t` to compute
+/// interpolated vertex data (pure math, no GL).
+pub fn lerp_positions(positions: &[f32], offsets: &[f32], t: f32) -> Vec<f32> {
+    let n = positions.len().min(offsets.len());
+    let mut data = vec![0.0f32; n];
+    for i in 0..n {
+        data[i] = positions[i] + offsets[i] * t;
+    }
+    data
+}
+
+

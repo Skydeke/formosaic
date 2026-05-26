@@ -791,12 +791,7 @@ impl Application for Formosaic {
                     // Skip during GhostSnap hint (ghost_lerp handles it).
                     if self.hints.tier() != HintTier::GhostSnap {
                         if let Some(model) = &self.model {
-                            let t = if dot >= CAMERA_FADE_DOT {
-                                1.0 - (dot - CAMERA_FADE_DOT) / (1.0 - CAMERA_FADE_DOT)
-                            } else {
-                                1.0
-                            };
-                            model.borrow().upload_lerp(t);
+                            model.borrow().upload_lerp(camera_scramble_t(dot));
                         }
                     }
 
@@ -1027,3 +1022,18 @@ impl Application for Formosaic {
         { style.touch_extra_padding = [8.0, 8.0]; }
     }
 }
+
+// ─── Camera-driven lerp formula (extracted for testability) ────────────────
+//
+// When the camera looks within CAMERA_FADE_DOT of the solution direction, the
+// model smoothly un-scrambles.  t=1 = fully scrambled, t=0 = fully solved.
+
+pub fn camera_scramble_t(dot: f32) -> f32 {
+    if dot >= CAMERA_FADE_DOT {
+        1.0 - (dot - CAMERA_FADE_DOT) / (1.0 - CAMERA_FADE_DOT)
+    } else {
+        1.0
+    }
+}
+
+
