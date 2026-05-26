@@ -109,6 +109,7 @@ pub struct UiState {
 const TARGET_WORLD_RADIUS: f32 = 1.0;
 const CAMERA_FOV:          f32 = 75.0 * std::f32::consts::PI / 180.0;
 const SNAP_THRESHOLD_DOT:  f32 = 0.996;
+const CAMERA_FADE_DOT:     f32 = 0.966;  // cos(15°) — un-scramble starts within this angle of solution
 const RESTORE_DURATION:    f32 = 1.8;
 /// Number of candidate axes tested in the entropy search.
 const ENTROPY_CANDIDATES:  usize = 32;
@@ -445,6 +446,11 @@ impl Formosaic {
         camera.borrow_mut().set_controller(None);
         self.game_state = GameState::Restoring { elapsed: 0.0, cam_start, cam_end };
 
+        // Snap the model to solved immediately — no un-scramble animation.
+        if let Some(model) = &self.model {
+            model.borrow().upload_lerp(0.0);
+        }
+
         if let Some(start) = self.level_start {
             self.elapsed_secs = start.elapsed().as_secs_f32();
         }
@@ -774,17 +780,33 @@ impl Application for Formosaic {
                 self.elapsed_secs += delta_time;
                 let snap = if let Some(sc) = &self.scramble_state {
                     let camera = ctx.camera();
-                    camera.borrow().transform.forward().normalize()
-                        .dot(sc.solution_dir.normalize()).abs() >= SNAP_THRESHOLD_DOT
+                    let fwd = camera.borrow().transform.forward().normalize();
+                    let dot = fwd.dot(sc.solution_dir.normalize()).abs();
+
+                    // Camera-driven un-scramble: when looking from near the
+                    // solution direction, smoothly reduce the scramble so
+                    // triangle seams disappear — the model appears correct
+                    // from the solution angle without needing ghost snap.
+                    // Skip during GhostSnap hint (ghost_lerp handles it).
+                    if self.hints.tier() != HintTier::GhostSnap {
+                        if let Some(model) = &self.model {
+                            let t = if dot >= CAMERA_FADE_DOT {
+                                1.0 - (dot - CAMERA_FADE_DOT) / (1.0 - CAMERA_FADE_DOT)
+                            } else {
+                                1.0
+                            };
+                            model.borrow().upload_lerp(t);
+                        }
+                    }
+
+                    dot >= SNAP_THRESHOLD_DOT
                 } else { false };
                 if snap { do_solve = true; }
             }
             GameState::Restoring { elapsed, cam_start, cam_end } => {
                 *elapsed += delta_time;
                 let ev = *elapsed;
-                let tri_t = if ev >= RESTORE_DURATION { do_restore_complete = true; 0.0 }
-                            else { 1.0 - smoothstep(ev / RESTORE_DURATION) };
-                if let Some(m) = &self.model { m.borrow().upload_lerp(tri_t); }
+                if ev >= RESTORE_DURATION { do_restore_complete = true; }
                 let t = smoothstep((ev / RESTORE_DURATION).min(1.0));
                 cam_pos    = Some(*cam_start + (*cam_end - *cam_start) * t);
                 cam_target = self.orbit.as_ref().map(|o| o.target);
