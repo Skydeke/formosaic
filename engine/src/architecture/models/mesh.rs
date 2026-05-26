@@ -258,7 +258,7 @@ impl Mesh {
 }
 
 impl Renderable for Mesh {
-    fn bind(&mut self) {
+    fn bind(&self) {
         self.vao.bind();
         self.vao.enable_attributes();
     }

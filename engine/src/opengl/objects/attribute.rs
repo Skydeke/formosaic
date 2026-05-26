@@ -1,3 +1,4 @@
+use std::cell::Cell;
 use gl::types::*;
 
 use crate::opengl::constants::data_type::DataType;
@@ -10,7 +11,7 @@ pub struct Attribute {
     bytes_per_vertex: usize,
     normalized: bool,
     instances: GLuint,
-    enabled: bool,
+    enabled: Cell<bool>,
 }
 
 impl Attribute {
@@ -80,23 +81,23 @@ impl Attribute {
             bytes_per_vertex: (component_count as usize) * data_type.bytes(),
             normalized,
             instances,
-            enabled: false,
+            enabled: Cell::new(false),
         }
     }
 
     /// Enable this attribute
-    pub fn enable(&mut self) {
-        if !self.enabled {
+    pub fn enable(&self) {
+        if !self.enabled.get() {
             unsafe { gl::EnableVertexAttribArray(self.attribute_index) };
-            self.enabled = true;
+            self.enabled.set(true);
         }
     }
 
     /// Disable this attribute
-    pub fn disable(&mut self) {
-        if self.enabled {
+    pub fn disable(&self) {
+        if self.enabled.get() {
             unsafe { gl::DisableVertexAttribArray(self.attribute_index) };
-            self.enabled = false;
+            self.enabled.set(false);
         }
     }
 

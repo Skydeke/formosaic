@@ -17,8 +17,8 @@ impl DummyModel {
 
 impl Model for DummyModel {
     fn render<T: Processable>(&self, _instance_state: &RenderState<T>, _mesh_idx: usize) {}
-    fn bind_and_configure(&mut self, _mesh_idx: usize) {}
-    fn unbind(&mut self, _mesh_idx: usize) {}
+    fn bind_and_configure(&self, _mesh_idx: usize) {}
+    fn unbind(&self, _mesh_idx: usize) {}
     fn delete(&mut self) {}
     fn get_lowest(&self) -> f32 { 0.0 }
     fn get_meshes(&self) -> &[Mesh] { &self.meshes }

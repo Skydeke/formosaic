@@ -8,8 +8,8 @@ use crate::{
 
 pub trait Model {
     fn render<T: Processable>(&self, instance_state: &RenderState<T>, mesh_idx: usize);
-    fn bind_and_configure(&mut self, mesh_idx: usize);
-    fn unbind(&mut self, mesh_idx: usize);
+    fn bind_and_configure(&self, mesh_idx: usize);
+    fn unbind(&self, mesh_idx: usize);
     fn delete(&mut self);
     fn get_lowest(&self) -> f32;
     fn get_meshes(&self) -> &[Mesh];

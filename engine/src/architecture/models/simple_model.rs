@@ -269,12 +269,12 @@ impl Model for SimpleModel {
         mesh.render(self.render_mode);
     }
 
-    fn bind_and_configure(&mut self, mesh_idx: usize) {
-        let mesh = &mut self.meshes[mesh_idx];
+    fn bind_and_configure(&self, mesh_idx: usize) {
+        let mesh = &self.meshes[mesh_idx];
         mesh.bind();
     }
 
-    fn unbind(&mut self, mesh_idx: usize) {
+    fn unbind(&self, mesh_idx: usize) {
         let mesh = &self.meshes[mesh_idx];
         mesh.unbind();
     }

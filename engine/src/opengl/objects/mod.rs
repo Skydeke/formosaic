@@ -3,5 +3,6 @@ pub mod clip_plane;
 pub mod data_buffer;
 pub mod index_buffer;
 pub mod ivbo;
+pub mod pbo;
 pub mod vao;
 pub mod vbo;

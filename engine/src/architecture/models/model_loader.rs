@@ -20,6 +20,7 @@ use crate::architecture::models::model_cache::ModelCache;
 use crate::architecture::models::simple_model::SimpleModel;
 use crate::opengl::constants::render_mode::RenderMode;
 use crate::opengl::fbos::simple_texture::SimpleTexture;
+use crate::opengl::objects::pbo::{supports_pbo, Pbo};
 use crate::opengl::textures::texture::Texture;
 
 pub struct ModelLoader;
@@ -385,40 +386,83 @@ impl ModelLoader {
     }
 
     /// Upload raw RGBA bytes as GL_TEXTURE_2D and return a SimpleTexture.
+    ///
+    /// Uses a PBO (pixel-buffer-object) for asynchronous upload when the
+    /// driver supports it (GLES 3.0+ / desktop GL 2.1+).  Falls back to
+    /// the traditional synchronous path otherwise.
     fn upload_rgba_texture(w: u32, h: u32, rgba: &[u8]) -> SimpleTexture {
         let tex = SimpleTexture::create();
+        let data_size = (w * h * 4) as usize;
         log::info!(
-            "[ModelLoader] upload_rgba_texture: id={}, {}x{}",
+            "[ModelLoader] upload_rgba_texture: id={}, {}x{} ({} bytes)",
             tex.get_id(),
             w,
-            h
+            h,
+            data_size
         );
-        unsafe {
-            gl::BindTexture(gl::TEXTURE_2D, tex.get_id());
-            gl::TexImage2D(
-                gl::TEXTURE_2D,
-                0,
-                gl::RGBA as i32,
-                w as i32,
-                h as i32,
-                0,
-                gl::RGBA,
-                gl::UNSIGNED_BYTE,
-                rgba.as_ptr() as *const _,
-            );
-            gl::GenerateMipmap(gl::TEXTURE_2D);
-            gl::TexParameteri(
-                gl::TEXTURE_2D,
-                gl::TEXTURE_MIN_FILTER,
-                gl::LINEAR_MIPMAP_LINEAR as i32,
-            );
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::REPEAT as i32);
-            gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::REPEAT as i32);
-            gl::BindTexture(gl::TEXTURE_2D, 0);
-            let err = gl::GetError();
-            if err != gl::NO_ERROR {
-                log::error!("[ModelLoader] GL error after texture upload: 0x{:X}", err);
+
+        if supports_pbo() {
+            let mut pbo = Pbo::create();
+            pbo.store_data(rgba);
+            unsafe {
+                gl::BindTexture(gl::TEXTURE_2D, tex.get_id());
+                pbo.bind();
+                gl::TexImage2D(
+                    gl::TEXTURE_2D,
+                    0,
+                    gl::RGBA as i32,
+                    w as i32,
+                    h as i32,
+                    0,
+                    gl::RGBA,
+                    gl::UNSIGNED_BYTE,
+                    std::ptr::null(),
+                );
+                pbo.unbind();
+                gl::GenerateMipmap(gl::TEXTURE_2D);
+                gl::TexParameteri(
+                    gl::TEXTURE_2D,
+                    gl::TEXTURE_MIN_FILTER,
+                    gl::LINEAR_MIPMAP_LINEAR as i32,
+                );
+                gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
+                gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::REPEAT as i32);
+                gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::REPEAT as i32);
+                gl::BindTexture(gl::TEXTURE_2D, 0);
+                let err = gl::GetError();
+                if err != gl::NO_ERROR {
+                    log::error!("[ModelLoader] GL error after PBO texture upload: 0x{:X}", err);
+                }
+            }
+            pbo.delete();
+        } else {
+            unsafe {
+                gl::BindTexture(gl::TEXTURE_2D, tex.get_id());
+                gl::TexImage2D(
+                    gl::TEXTURE_2D,
+                    0,
+                    gl::RGBA as i32,
+                    w as i32,
+                    h as i32,
+                    0,
+                    gl::RGBA,
+                    gl::UNSIGNED_BYTE,
+                    rgba.as_ptr() as *const _,
+                );
+                gl::GenerateMipmap(gl::TEXTURE_2D);
+                gl::TexParameteri(
+                    gl::TEXTURE_2D,
+                    gl::TEXTURE_MIN_FILTER,
+                    gl::LINEAR_MIPMAP_LINEAR as i32,
+                );
+                gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_MAG_FILTER, gl::LINEAR as i32);
+                gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_S, gl::REPEAT as i32);
+                gl::TexParameteri(gl::TEXTURE_2D, gl::TEXTURE_WRAP_T, gl::REPEAT as i32);
+                gl::BindTexture(gl::TEXTURE_2D, 0);
+                let err = gl::GetError();
+                if err != gl::NO_ERROR {
+                    log::error!("[ModelLoader] GL error after texture upload: 0x{:X}", err);
+                }
             }
         }
         tex

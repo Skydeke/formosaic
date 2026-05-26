@@ -59,14 +59,14 @@ impl Vao {
         }
     }
 
-    pub fn enable_attributes(&mut self) {
-        for attr in &mut self.attributes {
+    pub fn enable_attributes(&self) {
+        for attr in &self.attributes {
             attr.enable();
         }
     }
 
-    pub fn disable_attributes(&mut self) {
-        for attr in &mut self.attributes {
+    pub fn disable_attributes(&self) {
+        for attr in &self.attributes {
             attr.disable();
         }
     }
