@@ -12,6 +12,7 @@
 
 pub mod asset_loader;
 pub mod formosaic;
+pub mod ui;
 pub mod rendering;
 pub mod input;
 pub mod level;
