@@ -668,6 +668,13 @@ impl Application for Formosaic {
         let queued: Vec<_> = self.ui_state.borrow_mut().queued_events.drain(..).collect();
         for ev in queued { self.on_event(&ev, ctx); }
 
+        // Open browser URL from credits panel.
+        if let Some(url) = self.ui_state.borrow_mut().open_url.take() {
+            if let Err(e) = webbrowser::open(&url) {
+                log::warn!("Failed to open URL {}: {e}", url);
+            }
+        }
+
         // Track elapsed frames in loading/building states.
         if matches!(self.mode, AppMode::Loading { .. } | AppMode::Building { .. }) {
             self.loading_frames = self.loading_frames.saturating_add(1);
