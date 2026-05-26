@@ -326,6 +326,7 @@ impl Formosaic {
             let dist = params.orbit_distance;
             let (ctrl, sp) = make_scrambled_orbit(centroid, dist, solution_dir);
             camera.borrow_mut().transform.position = sp;
+            camera.borrow_mut().transform.look_at(centroid, Vector3::unit_y());
             self.orbit = Some(OrbitController::new(centroid, dist));
             camera.borrow_mut().set_controller(Some(Box::new(ctrl)));
         }
