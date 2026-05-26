@@ -117,6 +117,101 @@ impl ModelLoadData {
     }
 }
 
+/// Builds a SimpleModel incrementally across multiple frames so the
+/// UI never freezes.  Work is split into two phases:
+///
+/// **Phase 1** – Build one mesh each frame (VAO / VBO creation, no textures).
+/// **Phase 2** – Upload one material's textures each frame (glTexImage2D +
+/// mipmap generation) and attach it to every mesh that references it.
+///
+/// After `build_next()` returns `true` you must NOT finalize in the same
+/// frame — always wait one frame before calling `finish()` so the entropy
+/// search and scramble don't pile on top of the last texture upload.
+pub struct IncrementalModelBuilder {
+    data: ModelLoadData,
+    /// (material_index, Mesh without textures)
+    built_meshes: Vec<(usize, Mesh)>,
+    /// How many meshes have been built so far (phase-1 cursor).
+    next_mesh: usize,
+    /// How many materials have been uploaded so far (phase-2 cursor).
+    next_material: usize,
+}
+
+impl IncrementalModelBuilder {
+    pub fn new(data: ModelLoadData) -> Self {
+        let mesh_count = data.meshes.len();
+        Self {
+            data,
+            built_meshes: Vec::with_capacity(mesh_count),
+            next_mesh: 0,
+            next_material: 0,
+        }
+    }
+
+    /// Progress in `[0, 1]`.  Accounts for both mesh-building and
+    /// texture-upload phases so the bar moves smoothly.
+    pub fn progress(&self) -> f32 {
+        let total = self.data.meshes.len() + self.data.materials.len();
+        if total == 0 { return 1.0; }
+        let done = self.next_mesh.min(self.data.meshes.len())
+                 + self.next_material.min(self.data.materials.len());
+        done as f32 / total as f32
+    }
+
+    /// Do one unit of work:
+    ///
+    /// 1. If meshes remain → build VAO/VBO for the next mesh (no textures).
+    /// 2. If materials remain → upload one material's textures and attach
+    ///    to every mesh that uses it.
+    ///
+    /// Returns `true` when **all** work is complete.
+    pub fn build_next(&mut self) -> bool {
+        // ── Phase 1: build mesh geometry (fast, <1 ms) ────────────────
+        if self.next_mesh < self.data.meshes.len() {
+            let m = &self.data.meshes[self.next_mesh];
+            let mesh = Mesh::from_raw(
+                m.positions.clone(),
+                m.normals.clone(),
+                m.texcoords.clone(),
+                m.indices.clone(),
+                m.colors.clone(),
+            );
+            self.built_meshes.push((m.material_index, mesh));
+            self.next_mesh += 1;
+            return false;
+        }
+
+        // ── Phase 2: upload one material's textures (5–15 ms) ─────────
+        if self.next_material < self.data.materials.len() {
+            let material = self.data.materials[self.next_material]
+                .clone()
+                .into_material();
+            // Attach to every mesh that references this material index.
+            for (mat_idx, mesh) in &mut self.built_meshes {
+                if *mat_idx == self.next_material {
+                    mesh.set_material(material.clone());
+                }
+            }
+            self.next_material += 1;
+            return false;
+        }
+
+        true // all done
+    }
+
+    /// Consume the builder and produce the final `SimpleModel`.
+    /// Only call after `build_next()` has returned `true`.
+    pub fn finish(self) -> Rc<RefCell<SimpleModel>> {
+        let meshes: Vec<Mesh> = self.built_meshes.into_iter().map(|(_, m)| m).collect();
+        Rc::new(RefCell::new(SimpleModel::with_mesh_transforms(
+            meshes,
+            self.data.render_mode,
+            self.data.centroid,
+            self.data.mesh_transforms,
+        )))
+    }
+}
+
 impl ModelLoader {
     pub fn load_from_bytes(cache_key: &str, bytes: &[u8], hint: &str) -> Rc<RefCell<SimpleModel>> {
         if let Some(model) = ModelCache::get(cache_key) {

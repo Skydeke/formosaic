@@ -92,10 +92,33 @@ pub fn best_scramble_axis(
     target_world_radius: f32,
     fov_radians: f32,
 ) -> AxisSearchResult {
+    let params = model.compute_puzzle_params(target_world_radius, fov_radians);
+    let positions = model_positions_flat(model);
+    let result = best_scramble_axis_from_offsets(&positions, params.min_disp, params.max_disp, candidates);
+    log::info!(
+        "[Entropy] best axis entropy={:.3} bits  isolation={:.2}°  difficulty={:.2}",
+        result.report.entropy_bits,
+        result.report.solution_isolation_rad.to_degrees(),
+        result.report.difficulty,
+    );
+    result
+}
+
+/// Search for the scramble axis that produces the most informative puzzle.
+///
+/// Works on raw flat position data so it can be called from a background thread
+/// without a `SimpleModel` or GPU context.
+///
+/// Samples `candidates` random axes, evaluates them via a lightweight score,
+/// and returns the one with the lowest entropy (most distinctive solution).
+pub fn best_scramble_axis_from_offsets(
+    positions_flat: &[f32],
+    min_disp: f32,
+    max_disp: f32,
+    candidates: usize,
+) -> AxisSearchResult {
     use rand::Rng;
     let mut rng = rand::rng();
-
-    let params = model.compute_puzzle_params(target_world_radius, fov_radians);
 
     let mut best_axis = Vector3::new(0.0, 1.0, 0.0);
     let mut best_report = EntropyReport {
@@ -105,14 +128,7 @@ pub fn best_scramble_axis(
         difficulty: 1.0,
     };
 
-    // We work with a throwaway clone of the offsets buffer so we can re-scramble
-    // without touching the real GPU-backed mesh data.
-    let positions = model_positions_flat(model);
-
-    // Restrict elevation to ±55° from horizontal so the solution axis is never
-    // nearly vertical (top/bottom).  A top-down axis is degenerate: the model
-    // looks similar from a wide cone of directions, making the puzzle unclear.
-    const MAX_ELEV: f32 = 55.0 * PI / 180.0;   // 55° in radians
+    const MAX_ELEV: f32 = 55.0 * PI / 180.0;
 
     for _ in 0..candidates {
         let theta: f32 = rng.random_range(0.0..2.0 * PI);
@@ -123,10 +139,9 @@ pub fn best_scramble_axis(
             phi.cos() * theta.sin(),
         ).normalize();
 
-        let offsets = simulate_scramble_offsets(&positions, axis, params.min_disp, params.max_disp);
+        let offsets = simulate_scramble_offsets(positions_flat, axis, min_disp, max_disp);
         let report  = analyse_axis(&offsets, axis);
 
-        // We want: low entropy AND well-isolated solution AND moderate difficulty
         let score = report.entropy_bits - report.solution_isolation_rad * 2.0;
         let best_score = best_report.entropy_bits - best_report.solution_isolation_rad * 2.0;
 

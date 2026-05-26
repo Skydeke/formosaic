@@ -38,7 +38,10 @@ use std::{cell::RefCell, rc::Rc, time::Instant, sync::mpsc::{channel, Receiver, 
 
 use formosaic_engine::{
     architecture::{
-        models::{model_loader::{ModelLoadData, ModelLoader}, simple_model::SimpleModel},
+        models::{
+            model_loader::{IncrementalModelBuilder, ModelLoadData, ModelLoader},
+            simple_model::{PuzzleParams, SimpleModel},
+        },
         scene::{
             entity::simple_entity::SimpleEntity,
             node::node::NodeBehavior,
@@ -59,7 +62,7 @@ use crate::{
         storage::{LevelMeta, LevelRegistry},
     },
     puzzle::{
-        entropy::{best_scramble_axis, difficulty_label, EntropyReport},
+        entropy::{best_scramble_axis_from_offsets, difficulty_label, EntropyReport},
         hints::{HintOutput, HintSystem, HintTier},
         scrambler::{make_scrambled_orbit, ScrambleState},
     },
@@ -129,12 +132,29 @@ enum AppMode {
     InGame  { level_id: String },
     Downloading { summary: ModelSummary },
     Loading { level_id: String },
+    Building { level_id: String },
+}
+
+/// Result sent from the background load thread to the main thread.
+/// Includes the CPU-parsed model data PLUS the pre-computed entropy axis,
+/// entropy report, and puzzle params — so the main thread never runs
+/// `best_scramble_axis` or `compute_puzzle_params`.
+struct LoadResult {
+    request_id: u64,
+    level_id: String,
+    data: ModelLoadData,
+    axis: Vector3<f32>,
+    report: EntropyReport,
+    params: PuzzleParams,
 }
 
 struct PendingLoad {
     request_id: u64,
     level_id: String,
     data: ModelLoadData,
+    axis: Vector3<f32>,
+    report: EntropyReport,
+    params: PuzzleParams,
 }
 
 // ─── Main struct ──────────────────────────────────────────────────────────────
@@ -156,10 +176,19 @@ pub struct Formosaic {
     load_seq:         u64,
     loading_frames:   u32,
     loading_started:  Option<Instant>,
-    load_tx:          Sender<(u64, String, ModelLoadData)>,
-    load_rx:          Receiver<(u64, String, ModelLoadData)>,
-    pending_load:     Option<PendingLoad>,
-    mode:             AppMode,
+    load_tx:          Sender<LoadResult>,
+    load_rx:          Receiver<LoadResult>,
+    pending_load:            Option<PendingLoad>,
+    incremental_builder:     Option<IncrementalModelBuilder>,
+    /// Builder whose work is fully done — finalization deferred to next frame
+    /// so it never compounds with the last mesh/texture upload.
+    pending_finalize_builder: Option<IncrementalModelBuilder>,
+    /// Pre-computed entropy axis/report/params from the background thread,
+    /// stored here while the incremental builder runs.
+    pending_axis:   Option<Vector3<f32>>,
+    pending_report: Option<EntropyReport>,
+    pending_params: Option<PuzzleParams>,
+    mode:           AppMode,
     solved_timer:     f32,   // seconds since solve; transitions to menu after 5s
     /// Scene lighting config — passed to the pipeline each frame via GameFrameData.
     scene_lights:     LightConfig,
@@ -192,6 +221,11 @@ impl Formosaic {
             load_tx,
             load_rx,
             pending_load: None,
+            incremental_builder: None,
+            pending_finalize_builder: None,
+            pending_axis: None,
+            pending_report: None,
+            pending_params: None,
             mode: AppMode::LevelSelect,
             solved_timer: 0.0,
             scene_lights: LightConfig::default(),
@@ -211,6 +245,11 @@ impl Formosaic {
         self.orbit  = None;
         self.hints.reset();
         self.loading_started = None;
+        self.incremental_builder = None;
+        self.pending_finalize_builder = None;
+        self.pending_axis = None;
+        self.pending_report = None;
+        self.pending_params = None;
 
         let bytes = if let Some(b) = preloaded {
             b.to_vec()
@@ -228,28 +267,45 @@ impl Formosaic {
             .and_then(|e| e.to_str())
             .unwrap_or("obj");
         let data = ModelLoader::prepare_from_bytes(path, &bytes, hint);
-        self.finalize_loaded_model(level_id.to_string(), data, ctx);
+
+        // Compute entropy and puzzle params from raw CPU data (no GPU needed).
+        // This runs before building so the ~3.8 s search never compounds with
+        // texture uploads on the main thread.
+        let pos_slices: Vec<&[f32]> = data.meshes.iter().map(|m| m.positions.as_slice()).collect();
+        let params = PuzzleParams::from_raw_positions(&pos_slices, &data.mesh_transforms, TARGET_WORLD_RADIUS, CAMERA_FOV);
+        let flat_positions: Vec<f32> = data.meshes.iter().flat_map(|m| m.positions.iter().copied()).collect();
+        let search = best_scramble_axis_from_offsets(&flat_positions, params.min_disp, params.max_disp, ENTROPY_CANDIDATES);
+
+        let mut builder = IncrementalModelBuilder::new(data);
+        while !builder.build_next() {}
+        self.finalize_loaded_model(level_id.to_string(), builder, search.axis, search.report, params, ctx);
     }
 
-    fn finalize_loaded_model(&mut self, level_id: String, data: ModelLoadData, ctx: &mut SceneContext) {
-        let model = data.build();
+    fn finalize_loaded_model(
+        &mut self,
+        level_id: String,
+        builder: IncrementalModelBuilder,
+        axis: Vector3<f32>,
+        report: EntropyReport,
+        params: PuzzleParams,
+        ctx: &mut SceneContext,
+    ) {
+        let model = builder.finish();
 
-        let search = best_scramble_axis(&model.borrow(), ENTROPY_CANDIDATES, TARGET_WORLD_RADIUS, CAMERA_FOV);
-        self.entropy_report = Some(search.report);
+        self.entropy_report = Some(report);
         log::info!(
             "[Formosaic] difficulty={} ({:.2})  entropy={:.2} bits  isolation={:.1}°",
-            difficulty_label(search.report.difficulty),
-            search.report.difficulty,
-            search.report.entropy_bits,
-            search.report.solution_isolation_rad.to_degrees(),
+            difficulty_label(report.difficulty),
+            report.difficulty,
+            report.entropy_bits,
+            report.solution_isolation_rad.to_degrees(),
         );
 
         if let Some(m) = self.registry.levels.iter_mut().find(|m| m.id == level_id) {
-            m.difficulty = search.report.difficulty;
+            m.difficulty = report.difficulty;
         }
 
-        let params = model.borrow().compute_puzzle_params(TARGET_WORLD_RADIUS, CAMERA_FOV);
-        model.borrow_mut().scramble_along_axis(search.axis, params.min_disp, params.max_disp);
+        model.borrow_mut().scramble_along_axis(axis, params.min_disp, params.max_disp);
 
         if let Some(scene) = ctx.scene() {
             let entity = Rc::new(RefCell::new(SimpleEntity::new(model.clone())));
@@ -259,7 +315,7 @@ impl Formosaic {
             entity.borrow_mut().transform_mut().set_position(Vector3::new(0.0, 0.0, 0.0));
 
             let entity_rot = entity.borrow().transform().rotation;
-            let solution_dir = (entity_rot * search.axis).normalize();
+            let solution_dir = (entity_rot * axis).normalize();
             self.scramble_state = Some(ScrambleState { solution_dir, params });
             scene.add_node(entity.clone());
             self.entity = Some(entity.clone());
@@ -332,6 +388,11 @@ impl Formosaic {
 
     fn begin_saved_level_load(&mut self, level_id: String, path: PathBuf, ctx: &mut SceneContext) {
         self.load_seq = self.load_seq.wrapping_add(1);
+        self.incremental_builder = None;
+        self.pending_finalize_builder = None;
+        self.pending_axis = None;
+        self.pending_report = None;
+        self.pending_params = None;
         let request_id = self.load_seq;
         self.mode = AppMode::Loading { level_id: level_id.clone() };
         self.loading_frames = 0;
@@ -348,7 +409,18 @@ impl Formosaic {
         std::thread::spawn(move || {
             if let Ok(bytes) = std::fs::read(&path) {
                 let data = ModelLoader::prepare_from_bytes_with_path(path.to_string_lossy().as_ref(), &bytes);
-                let _ = tx.send((request_id, level_id, data));
+                let pos_slices: Vec<&[f32]> = data.meshes.iter().map(|m| m.positions.as_slice()).collect();
+                let params = PuzzleParams::from_raw_positions(&pos_slices, &data.mesh_transforms, TARGET_WORLD_RADIUS, CAMERA_FOV);
+                let flat_positions: Vec<f32> = data.meshes.iter().flat_map(|m| m.positions.iter().copied()).collect();
+                let search = best_scramble_axis_from_offsets(&flat_positions, params.min_disp, params.max_disp, ENTROPY_CANDIDATES);
+                let _ = tx.send(LoadResult {
+                    request_id,
+                    level_id,
+                    data,
+                    axis: search.axis,
+                    report: search.report,
+                    params,
+                });
             }
         });
     }
@@ -474,6 +546,11 @@ impl Formosaic {
 
     fn begin_preloaded_level_load(&mut self, level_id: String, path: String, bytes: Vec<u8>, ctx: &mut SceneContext) {
         self.load_seq = self.load_seq.wrapping_add(1);
+        self.incremental_builder = None;
+        self.pending_finalize_builder = None;
+        self.pending_axis = None;
+        self.pending_report = None;
+        self.pending_params = None;
         let request_id = self.load_seq;
         self.mode = AppMode::Loading { level_id: level_id.clone() };
         self.loading_frames = 0;
@@ -489,7 +566,18 @@ impl Formosaic {
         let tx = self.load_tx.clone();
         std::thread::spawn(move || {
             let data = ModelLoader::prepare_from_bytes_with_path(&path, &bytes);
-            let _ = tx.send((request_id, level_id, data));
+            let pos_slices: Vec<&[f32]> = data.meshes.iter().map(|m| m.positions.as_slice()).collect();
+            let params = PuzzleParams::from_raw_positions(&pos_slices, &data.mesh_transforms, TARGET_WORLD_RADIUS, CAMERA_FOV);
+            let flat_positions: Vec<f32> = data.meshes.iter().flat_map(|m| m.positions.iter().copied()).collect();
+            let search = best_scramble_axis_from_offsets(&flat_positions, params.min_disp, params.max_disp, ENTROPY_CANDIDATES);
+            let _ = tx.send(LoadResult {
+                request_id,
+                level_id,
+                data,
+                axis: search.axis,
+                report: search.report,
+                params,
+            });
         });
     }
 
@@ -508,7 +596,7 @@ impl Formosaic {
 
     /// True when the level-select / menu overlay should be shown.
     pub fn is_in_menu(&self) -> bool {
-        matches!(self.mode, AppMode::LevelSelect | AppMode::Loading { .. })
+        matches!(self.mode, AppMode::LevelSelect | AppMode::Loading { .. } | AppMode::Building { .. })
     }
 
     /// Index of the currently highlighted level in the menu grid.
@@ -588,74 +676,6 @@ impl Formosaic {
                     });
             });
             scene.add_node(Rc::new(RefCell::new(hud)));
-        }
-
-        // ── Credits (after solve) ────────────────────────────────────────
-        {
-            let state = Rc::clone(&self.ui_state);
-            let credits = UiNode::new("credits", move |ui, w, h, _ctx| {
-                let s = state.borrow();
-                if s.show_menu || !s.is_solved { return; }
-                let Some(level) = &s.current_level else { return; };
-                let level_name = level.name.clone();
-                let level_author = level.author.clone();
-                let level_license = level.license.clone();
-                let level_source = level.source_url.clone();
-                drop(s);
-                let mut open_link = false;
-                let mut go_menu = false;
-                let _win_bg = ui.push_style_color(imgui::StyleColor::WindowBg, [0.03, 0.04, 0.06, 0.82]);
-                ui.window("##credits")
-                    .flags(WindowFlags::NO_DECORATION | WindowFlags::NO_MOVE | WindowFlags::NO_SAVED_SETTINGS)
-                    .position([w * 0.5, h * 0.5], Condition::Always)
-                    .position_pivot([0.5, 0.5])
-                    .size([
-                        (w - 48.0).clamp(320.0, 520.0),
-                        124.0,
-                    ], Condition::Always)
-                    .build(|| {
-                        ui.text_colored([0.85, 0.62, 0.18, 1.0], "Level Complete");
-                        ui.text_colored([0.88, 0.90, 0.96, 1.0], format!("{} by {}", level_name, level_author));
-                        ui.text_colored([0.50, 0.56, 0.68, 0.9], level_license);
-                        if ui.button("Open Artist Link") {
-                            open_link = true;
-                        }
-                        ui.same_line_with_spacing(0.0, 12.0);
-                        if ui.button("Back to Main Menu") {
-                            go_menu = true;
-                        }
-                    });
-                drop(_win_bg);
-                if open_link {
-                    state.borrow_mut().open_url = Some(level_source);
-                }
-                if go_menu {
-                    state.borrow_mut().queued_events.push(Event::KeyDown { key: Key::Escape });
-                }
-            });
-            scene.add_node(Rc::new(RefCell::new(credits)));
-        }
-
-        // ── Loading overlay (centered) ───────────────────────────────────
-        {
-            let state = Rc::clone(&self.ui_state);
-            let loading = UiNode::new("loading", move |ui, w, h, _ctx| {
-                let s = state.borrow();
-                if !s.is_loading { return; }
-                ui.window("##loading")
-                    .flags(WindowFlags::NO_DECORATION | WindowFlags::NO_MOVE | WindowFlags::NO_SAVED_SETTINGS | WindowFlags::NO_BACKGROUND | WindowFlags::NO_NAV | WindowFlags::NO_INPUTS)
-                    .position([w * 0.5, h * 0.5], Condition::Always)
-                    .position_pivot([0.5, 0.5])
-                    .size([360.0, 120.0], Condition::Always)
-                    .build(|| {
-                        ui.text_colored([0.85, 0.62, 0.18, 1.0], "Loading level...");
-                        ui.set_cursor_pos([18.0, 42.0]);
-                        let p = s.download_progress.unwrap_or(0.0);
-                        let label = if p > 0.0 { format!("{:.0}%", p * 100.0) } else { "Loading...".to_string() };
-                        imgui::ProgressBar::new(p).size([320.0, 18.0]).overlay_text(&label).build(ui);
-                    });
-            });
-            scene.add_node(Rc::new(RefCell::new(loading)));
         }
 
         // ── Hint warmth indicator (top-left, in-game only) ────────────────
@@ -763,16 +783,19 @@ impl Formosaic {
                             // Title bar
                             let _tok = ui.push_style_color(imgui::StyleColor::ChildBg, [0.03, 0.04, 0.06, 0.95]);
                             ui.child_window("##hdr").size([w, title_h]).scroll_bar(false).border(false).build(|| {
+                                let bar_w = 140.0_f32;
+                                // Title — left
                                 ui.set_cursor_pos([pad, (title_h - 16.0) * 0.5]);
                                 ui.text_colored([0.85, 0.62, 0.18, 1.0], "FORMOSAIC");
                                 if is_dl {
                                     ui.same_line_with_spacing(0.0, pad);
                                     ui.text_colored([0.4, 0.75, 1.0, 0.9], "Fetching...");
                                 }
+                                // Progress bar — right-aligned
                                 if let Some(p) = s.download_progress {
-                                    ui.same_line_with_spacing(0.0, pad);
+                                    ui.set_cursor_pos([w - pad - bar_w, (title_h - 10.0) * 0.5]);
                                     imgui::ProgressBar::new(p)
-                                        .size([140.0, 10.0])
+                                        .size([bar_w, 10.0])
                                         .overlay_text(&format!("{:.0}%", p * 100.0))
                                         .build(ui);
                                 }
@@ -855,6 +878,17 @@ impl Formosaic {
                             // Top action bar — title left, buttons right-aligned
                             let _tok = ui.push_style_color(imgui::StyleColor::ChildBg, [0.03, 0.04, 0.06, 0.95]);
                             ui.child_window("##bar").size([w, bar_h]).scroll_bar(false).border(false).build(|| {
+                                let btn_h_bar = bar_h - 4.0;
+                                let n_w   = 150.0_f32;
+                                let r_w   = 100.0_f32;
+                                let gap   = 4.0_f32;
+                                let ver_w = 32.0_f32;
+                                let bar_w = 150.0_f32;
+
+                                // Right-edge positions (compute before drawing)
+                                let r_x  = w - ver_w - pad - gap - r_w;
+                                let n_x  = r_x - gap - n_w;
+
                                 // Title — left
                                 ui.set_cursor_pos([pad, (bar_h - 14.0) * 0.5]);
                                 ui.text_colored([0.85, 0.62, 0.18, 1.0], "FORMOSAIC");
@@ -864,29 +898,21 @@ impl Formosaic {
                                     ui.set_cursor_pos([ui.cursor_pos()[0], (bar_h - 14.0) * 0.5]);
                                     ui.text_colored([0.4, 0.75, 1.0, 0.9], "Fetching...");
                                 }
+                                // Progress bar — right-aligned before buttons
                                 if let Some(p) = s.download_progress {
-                                    ui.same_line_with_spacing(0.0, pad);
-                                    ui.set_cursor_pos([ui.cursor_pos()[0], 5.0]);
+                                    ui.set_cursor_pos([n_x - gap - bar_w, 5.0]);
                                     imgui::ProgressBar::new(p)
-                                        .size([150.0, 10.0])
+                                        .size([bar_w, 10.0])
                                         .overlay_text(&format!("{:.0}%", p * 100.0))
                                         .build(ui);
                                 }
-                                // Buttons — right-aligned: [R] at far right, [N] left of it
-                                let btn_h_bar = bar_h - 4.0;
-                                let n_w   = 150.0_f32;
-                                let r_w   = 100.0_f32;
-                                let gap   = 4.0_f32;
-                                let ver_w = 32.0_f32;
                                 // version string
                                 ui.set_cursor_pos([w - ver_w - pad, (bar_h - 13.0) * 0.5]);
                                 ui.text_colored([0.28, 0.34, 0.46, 0.6], "v0.1");
                                 // [R] Random
-                                let r_x = w - ver_w - pad - gap - r_w;
                                 ui.set_cursor_pos([r_x, 2.0]);
                                 if ui.button_with_size("[R] Random", [r_w, btn_h_bar]) { random_saved = true; }
                                 // [N] Fetch Online
-                                let n_x = r_x - gap - n_w;
                                 ui.set_cursor_pos([n_x, 2.0]);
                                 if ui.button_with_size("[N] Fetch Online", [n_w, btn_h_bar]) { fetch_online = true; }
                             });
@@ -975,6 +1001,79 @@ impl Formosaic {
             });
             scene.add_node(Rc::new(RefCell::new(menu)));
         }
+
+        // ── Credits (after solve) ────────────────────────────────────────
+        // Registered after the menu so this popup draws on top of it.
+        {
+            let state = Rc::clone(&self.ui_state);
+            let credits = UiNode::new("credits", move |ui, w, h, _ctx| {
+                let s = state.borrow();
+                if s.show_menu || !s.is_solved { return; }
+                let Some(level) = &s.current_level else { return; };
+                let level_name = level.name.clone();
+                let level_author = level.author.clone();
+                let level_license = level.license.clone();
+                let level_source = level.source_url.clone();
+                drop(s);
+                let mut open_link = false;
+                let mut go_menu = false;
+                let _win_bg = ui.push_style_color(imgui::StyleColor::WindowBg, [0.03, 0.04, 0.06, 0.82]);
+                ui.window("##credits")
+                    .flags(WindowFlags::NO_DECORATION | WindowFlags::NO_MOVE | WindowFlags::NO_SAVED_SETTINGS)
+                    .position([w * 0.5, h * 0.5], Condition::Always)
+                    .position_pivot([0.5, 0.5])
+                    .size([
+                        (w - 48.0).clamp(320.0, 520.0),
+                        124.0,
+                    ], Condition::Always)
+                    .build(|| {
+                        ui.text_colored([0.85, 0.62, 0.18, 1.0], "Level Complete");
+                        ui.text_colored([0.88, 0.90, 0.96, 1.0], format!("{} by {}", level_name, level_author));
+                        ui.text_colored([0.50, 0.56, 0.68, 0.9], level_license);
+                        if ui.button("Open Artist Link") {
+                            open_link = true;
+                        }
+                        ui.same_line_with_spacing(0.0, 12.0);
+                        if ui.button("Back to Main Menu") {
+                            go_menu = true;
+                        }
+                    });
+                drop(_win_bg);
+                if open_link {
+                    state.borrow_mut().open_url = Some(level_source);
+                }
+                if go_menu {
+                    state.borrow_mut().queued_events.push(Event::KeyDown { key: Key::Escape });
+                }
+            });
+            scene.add_node(Rc::new(RefCell::new(credits)));
+        }
+
+        // ── Loading overlay (centered) ───────────────────────────────────
+        // Registered after the menu so it draws on top of the level list.
+        {
+            let state = Rc::clone(&self.ui_state);
+            let loading = UiNode::new("loading", move |ui, w, h, _ctx| {
+                let s = state.borrow();
+                if !s.is_loading { return; }
+                let _win_bg = ui.push_style_color(imgui::StyleColor::WindowBg, [0.03, 0.04, 0.06, 0.82]);
+                ui.window("##loading")
+                    .flags(WindowFlags::NO_DECORATION | WindowFlags::NO_MOVE | WindowFlags::NO_SAVED_SETTINGS | WindowFlags::NO_NAV | WindowFlags::NO_INPUTS)
+                    .position([w * 0.5, h * 0.5], Condition::Always)
+                    .position_pivot([0.5, 0.5])
+                    .size([360.0, 120.0], Condition::Always)
+                    .focused(true)
+                    .build(|| {
+                        ui.text_colored([0.85, 0.62, 0.18, 1.0], "Loading level...");
+                        ui.set_cursor_pos([18.0, 42.0]);
+                        let p = s.download_progress.unwrap_or(0.0);
+                        let label = if p > 0.0 { format!("{:.0}%", p * 100.0) } else { "Loading...".to_string() };
+                        imgui::ProgressBar::new(p).size([320.0, 18.0]).overlay_text(&label).build(ui);
+                    });
+                drop(_win_bg);
+            });
+            scene.add_node(Rc::new(RefCell::new(loading)));
+        }
     }
 }
 
@@ -1015,21 +1114,58 @@ impl Application for Formosaic {
         let queued: Vec<_> = self.ui_state.borrow_mut().queued_events.drain(..).collect();
         for ev in queued { self.on_event(&ev, ctx); }
 
-        if matches!(self.mode, AppMode::Loading { .. }) {
+        // Track elapsed frames in loading/building states.
+        if matches!(self.mode, AppMode::Loading { .. } | AppMode::Building { .. }) {
             self.loading_frames = self.loading_frames.saturating_add(1);
         }
 
-        if let Ok((request_id, level_id, data)) = self.load_rx.try_recv() {
-            self.pending_load = Some(PendingLoad { request_id, level_id, data });
+        // Receive CPU-parsed model data from the background thread.
+        if let Ok(result) = self.load_rx.try_recv() {
+            self.pending_load = Some(PendingLoad {
+                request_id: result.request_id,
+                level_id: result.level_id,
+                data: result.data,
+                axis: result.axis,
+                report: result.report,
+                params: result.params,
+            });
         }
 
+        // Loading → Building transition: data arrived from bg thread.
         if let Some(load) = self.pending_load.take() {
             if load.request_id != self.load_seq || self.loading_frames == 0 {
                 self.pending_load = Some(load);
             } else {
-                self.finalize_loaded_model(load.level_id, load.data, ctx);
+                let level_id = load.level_id.clone();
+                self.pending_axis = Some(load.axis);
+                self.pending_report = Some(load.report);
+                self.pending_params = Some(load.params);
+                self.mode = AppMode::Building { level_id };
+                self.incremental_builder = Some(IncrementalModelBuilder::new(load.data));
                 self.loading_frames = 0;
             }
+        }
+
+        // Incremental GPU build: one unit of work per frame.
+        if let Some(builder) = &mut self.incremental_builder {
+            if builder.build_next() {
+                // All meshes built and all textures uploaded — defer finalization
+                // to the next frame so it never compounds with the last upload.
+                self.pending_finalize_builder = self.incremental_builder.take();
+            }
+        }
+
+        // Deferred finalization (separate frame from last build step).
+        if let Some(builder) = self.pending_finalize_builder.take() {
+            let level_id = match &self.mode {
+                AppMode::Building { level_id } => level_id.clone(),
+                _ => unreachable!(),
+            };
+            let axis = self.pending_axis.take().unwrap();
+            let report = self.pending_report.take().unwrap();
+            let params = self.pending_params.take().unwrap();
+            self.finalize_loaded_model(level_id, builder, axis, report, params, ctx);
+            self.loading_frames = 0;
         }
 
         self.poll_client(ctx);
@@ -1111,6 +1247,11 @@ impl Application for Formosaic {
             }
             Event::KeyDown { key: Key::Escape } => {
                 self.mode = AppMode::LevelSelect;
+                self.incremental_builder = None;
+                self.pending_finalize_builder = None;
+                self.pending_axis = None;
+                self.pending_report = None;
+                self.pending_params = None;
             }
             _ => {
                 if matches!(self.game_state, GameState::Playing | GameState::Solved) {
@@ -1151,10 +1292,18 @@ impl Application for Formosaic {
             ui.hint_warmth    = self.last_hint_output.as_ref().map(|o| o.warmth).unwrap_or(0.5);
             ui.is_solved      = self.game_state == GameState::Solved;
             ui.is_downloading = matches!(self.mode, AppMode::Downloading { .. }) || self.client.is_download_pending();
-            ui.is_loading     = matches!(self.mode, AppMode::Loading { .. });
-            ui.download_progress = if ui.is_loading {
+            ui.is_loading     = matches!(self.mode, AppMode::Loading { .. } | AppMode::Building { .. });
+            ui.download_progress = if matches!(self.mode, AppMode::Loading { .. }) {
+                // Phase 1: background thread parsing — capped at 30%.
                 let t = self.loading_started.map(|start| start.elapsed().as_secs_f32()).unwrap_or(0.0);
-                Some((t / 2.0).clamp(0.05, 0.95))
+                Some((t / 2.0).clamp(0.05, 0.30))
+            } else if self.pending_finalize_builder.is_some() {
+                // Deferred finalization frame — all GPU work done, bar at 99%.
+                Some(0.99)
+            } else if let AppMode::Building { .. } = &self.mode {
+                // Phase 2: incremental GPU upload — real progress, 30% → 95%.
+                let p = self.incremental_builder.as_ref().map(|b| b.progress()).unwrap_or(0.0);
+                Some(0.30 + p * 0.65)
             } else if ui.is_downloading {
                 Some((self.client.download_progress_bytes() as f32 / 1_000_000.0).clamp(0.0, 0.95))
             } else {
@@ -1164,7 +1313,7 @@ impl Application for Formosaic {
             ui.is_touch       = cfg!(target_os = "android");
             ui.levels         = self.registry.levels.clone();
             ui.current_level  = match &self.mode {
-                AppMode::InGame { level_id } | AppMode::Loading { level_id } => {
+                AppMode::InGame { level_id } | AppMode::Loading { level_id } | AppMode::Building { level_id } => {
                     self.registry.levels.iter().find(|l| &l.id == level_id).cloned()
                 }
                 _ => None,
