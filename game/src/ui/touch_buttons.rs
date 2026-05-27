@@ -1,7 +1,8 @@
 use std::{cell::RefCell, rc::Rc};
 use formosaic_engine::architecture::scene::node::{ui_node::UiNode, scenegraph::Scenegraph};
 use imgui::*;
-use crate::formosaic::{UiAction, UiState, UiScreen};
+use crate::formosaic::UiState;
+use crate::ui::state_machine::{UiInput, UiScreen};
 use super::util::Scale;
 
 pub fn register(scene: &Scenegraph, state: Rc<RefCell<UiState>>) {
@@ -28,8 +29,8 @@ pub fn register(scene: &Scenegraph, state: Rc<RefCell<UiState>>) {
                 menu_clicked = ui.button_with_size("Menu", [btn_w, btn_h]);
             });
         drop(s);
-        if hint_clicked { ctx.push_ui_action(UiAction::Hint); }
-        if menu_clicked { ctx.push_ui_action(UiAction::Menu); }
+        if hint_clicked { ctx.push_ui_action(UiInput::Hint); }
+        if menu_clicked { ctx.push_ui_action(UiInput::MenuPressed); }
     });
     scene.add_node(Rc::new(RefCell::new(touch)));
 }
