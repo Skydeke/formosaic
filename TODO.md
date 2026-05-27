@@ -1,4 +1,10 @@
 - UnitTests for game + Engine (running in CIs and Locally)
     - UIStatemachine
 
-- Some models have strange shading. I want a low poly look, but they dont seem to work...
+- Scramble: For animated model pick random animation frame
+
+- Better Main menu
+
+- Models should rotate around their visual center
+
+- State saftety, disable buttons while loading level
