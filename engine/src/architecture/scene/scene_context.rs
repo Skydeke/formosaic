@@ -1,3 +1,4 @@
+use std::any::Any;
 use cgmath::Vector2;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -32,6 +33,8 @@ pub struct SceneContext {
     /// Frame delta time in seconds.
     pub delta_time:      f32,
 
+    ui_actions: Vec<Box<dyn Any>>,
+
 }
 
 impl SceneContext {
@@ -48,6 +51,7 @@ impl SceneContext {
             show_menu:       false,
             is_touch:        false,
             delta_time:      0.0,
+            ui_actions:      Vec::new(),
         }
     }
 
@@ -80,6 +84,22 @@ impl SceneContext {
 
     pub fn get_camera(&self) -> &RefCell<Camera> {
         &self.camera
+    }
+
+    /// Queue a UI action emitted by a `UiNode` callback.
+    pub fn push_ui_action<A: Any>(&mut self, action: A) {
+        self.ui_actions.push(Box::new(action));
+    }
+
+    /// Drain queued UI actions of one concrete type.
+    pub fn drain_ui_actions<A: Any>(&mut self) -> Vec<A> {
+        let mut actions = Vec::new();
+        for action in std::mem::take(&mut self.ui_actions) {
+            if let Ok(action) = action.downcast::<A>() {
+                actions.push(*action);
+            }
+        }
+        actions
     }
 }
 

@@ -19,6 +19,9 @@ pub trait Application {
     /// the renderer.
     fn populate_scene_context(&mut self, ctx: &mut SceneContext, delta_time: f32);
 
+    /// Handle any UI actions emitted while the ImGui frame was built.
+    fn handle_ui_actions(&mut self, _context: &mut SceneContext) {}
+
     // ── Renderer registration ─────────────────────────────────────────────
     /// Register game-specific `IRenderer` instances onto the pipeline.
     /// Called once by `GameEngine` after GL is initialised.

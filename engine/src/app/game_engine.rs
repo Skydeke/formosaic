@@ -258,6 +258,8 @@ impl<A: Application + 'static> ApplicationHandler for GameEngine<A> {
                                 imgui_r.prepare(window, pw, ph, scale, &mut sc);
                             }
                         }
+
+                        app.handle_ui_actions(&mut sc);
                     }
 
                     self.pipeline.as_mut().unwrap().draw(size.width, size.height);

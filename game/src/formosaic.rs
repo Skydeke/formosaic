@@ -56,6 +56,8 @@ use formosaic_engine::{
 };
 use imgui;
 
+use crate::ui::state_machine::{UiInput, UiScreen, UiStateMachine, UiTransition};
+
 use crate::{
     level::{
         poly_pizza::{ModelDownload, ModelSummary, PolyPizzaClient},
@@ -78,9 +80,8 @@ pub use formosaic_engine::app::application::Application;
 // Formosaic fills in each frame inside `populate_scene_context` — before the
 // engine calls the UiNodes for that frame.
 
-#[derive(Default, Clone)]
+#[derive(Clone)]
 pub struct UiState {
-    // ── In-game ──────────────────────────────────────────────────────────
     pub elapsed_secs:  f32,
     pub difficulty:    Option<f32>,
     pub hint_count:    u32,
@@ -90,18 +91,30 @@ pub struct UiState {
     pub is_downloading: bool,
     pub is_loading:    bool,
     pub download_progress: Option<f32>,
-    pub show_menu:     bool,
     pub is_touch:      bool,
-    // ── Menu ─────────────────────────────────────────────────────────────
     pub levels:        Vec<LevelMeta>,
     pub current_level: Option<LevelMeta>,
-    // ── Events fired by UI back to game logic ────────────────────────────
-    /// Key events queued by UiNode callbacks; drained by Formosaic::on_update.
-    pub queued_events: Vec<formosaic_engine::input::Event>,
-    /// Specific level ID to play — set by the Play button, drained by on_update.
-    pub play_specific: Option<String>,
-    /// URL to open from credits.
-    pub open_url: Option<String>,
+    pub screen:        UiScreen,
+}
+
+impl Default for UiState {
+    fn default() -> Self {
+        Self {
+            elapsed_secs: 0.0,
+            difficulty: None,
+            hint_count: 0,
+            hint_tier: HintTier::None,
+            hint_warmth: 0.5,
+            is_solved: false,
+            is_downloading: false,
+            is_loading: false,
+            download_progress: None,
+            is_touch: false,
+            levels: Vec::new(),
+            current_level: None,
+            screen: UiScreen::MainMenu,
+        }
+    }
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -193,6 +206,7 @@ pub struct Formosaic {
     pending_report: Option<EntropyReport>,
     pending_params: Option<PuzzleParams>,
     mode:           AppMode,
+    ui_machine:     UiStateMachine,
     solved_timer:     f32,   // seconds since solve; transitions to menu after 5s
     /// Scene lighting config — passed to the pipeline each frame via GameFrameData.
     scene_lights:     LightConfig,
@@ -233,6 +247,7 @@ impl Formosaic {
             pending_report: None,
             pending_params: None,
             mode: AppMode::LevelSelect,
+            ui_machine: UiStateMachine::new(),
             solved_timer: 0.0,
             scene_lights: LightConfig::default(),
             ui_state: Rc::new(RefCell::new(UiState::default())),
@@ -340,6 +355,8 @@ impl Formosaic {
 
         self.model = Some(model);
         self.game_state = GameState::Playing;
+        self.ui_machine = UiStateMachine::new();
+        let _ = self.ui_machine.handle(UiInput::PlayLevel(level_id.clone()), false);
         self.level_start = Some(Instant::now());
         self.elapsed_secs = 0.0;
         self.mode = AppMode::InGame { level_id };
@@ -678,10 +695,45 @@ impl Formosaic {
         if let Some(scene) = ctx.scene() {
             scene.clear();
         }
-        if self.is_in_menu() {
+        if matches!(self.ui_machine.screen(), UiScreen::MainMenu) {
             self.register_menu_scene(ctx);
         } else {
             self.register_game_scene(ctx);
+        }
+    }
+
+    fn apply_ui_transitions(&mut self, transitions: Vec<UiTransition>, ctx: &mut SceneContext) {
+        for transition in transitions {
+            match transition {
+                UiTransition::ShowMainMenu => {
+                    self.mode = AppMode::LevelSelect;
+                    self.incremental_builder = None;
+                    self.pending_finalize_builder = None;
+                    self.pending_axis = None;
+                    self.pending_report = None;
+                    self.pending_params = None;
+                    self.sync_scenegraph(ctx);
+                }
+                UiTransition::ShowCredits => {
+                    self.sync_scenegraph(ctx);
+                }
+                UiTransition::StartLevel(id) => {
+                    if let Some(meta) = self.registry.levels.iter().find(|m| m.id == id).cloned() {
+                        let path = self.registry.model_path(&meta);
+                        if path.exists() {
+                            self.begin_saved_level_load(meta.id.clone(), path, ctx);
+                        }
+                    }
+                }
+                UiTransition::FetchOnline => self.fetch_online_level(),
+                UiTransition::RandomSaved => self.load_random_saved(ctx),
+                UiTransition::AdvanceHint => self.hints.advance(),
+                UiTransition::OpenArtistLink(url) => {
+                    if let Err(e) = webbrowser::open(&url) {
+                        log::warn!("Failed to open URL {}: {e}", url);
+                    }
+                }
+            }
         }
     }
 }
@@ -697,6 +749,11 @@ fn smoothstep(t: f32) -> f32 {
 impl Application for Formosaic {
     fn on_init(&mut self, ctx: &mut SceneContext) {
         log::info!("[Formosaic] on_init");
+        // If resuming from GL context loss while in Credits, reset to MainMenu
+        // before sync_scenegraph so the correct scene is registered.
+        if matches!(self.ui_machine.screen(), UiScreen::Credits) {
+            self.ui_machine = UiStateMachine::new();
+        }
         self.seed_builtin_levels();
         self.sync_scenegraph(ctx);
 
@@ -722,27 +779,7 @@ impl Application for Formosaic {
     }
 
     fn on_update(&mut self, delta_time: f32, ctx: &mut SceneContext) {
-        // Drain play_specific first — a specific level ID from the menu Play button.
-        let play_id = self.ui_state.borrow_mut().play_specific.take();
-        if let Some(id) = play_id {
-            if let Some(meta) = self.registry.levels.iter().find(|m| m.id == id).cloned() {
-                let path = self.registry.model_path(&meta);
-                if path.exists() {
-                    self.begin_saved_level_load(meta.id.clone(), path, ctx);
-                }
-            }
-        }
-
-        // Drain any key events queued by UiNode callbacks.
-        let queued: Vec<_> = self.ui_state.borrow_mut().queued_events.drain(..).collect();
-        for ev in queued { self.on_event(&ev, ctx); }
-
-        // Open browser URL from credits panel.
-        if let Some(url) = self.ui_state.borrow_mut().open_url.take() {
-            if let Err(e) = webbrowser::open(&url) {
-                log::warn!("Failed to open URL {}: {e}", url);
-            }
-        }
+        self.handle_ui_actions(ctx);
 
         // Track elapsed frames in loading/building states.
         if matches!(self.mode, AppMode::Loading { .. } | AppMode::Building { .. } | AppMode::FetchingOnline) {
@@ -892,13 +929,8 @@ impl Application for Formosaic {
                 self.fetch_online_level();
             }
             Event::KeyDown { key: Key::Escape } => {
-                self.mode = AppMode::LevelSelect;
-                self.incremental_builder = None;
-                self.pending_finalize_builder = None;
-                self.pending_axis = None;
-                self.pending_report = None;
-                self.pending_params = None;
-                self.sync_scenegraph(ctx);
+                let inputs = self.ui_machine.handle(UiInput::EscapePressed, self.game_state == GameState::Solved);
+                self.apply_ui_transitions(inputs, ctx);
             }
             _ => {
                 if matches!(self.game_state, GameState::Playing | GameState::Solved) {
@@ -913,14 +945,21 @@ impl Application for Formosaic {
         }
     }
 
+    fn handle_ui_actions(&mut self, ctx: &mut SceneContext) {
+        for input in ctx.drain_ui_actions::<UiInput>() {
+            let transitions = self.ui_machine.handle(input, self.game_state == GameState::Solved);
+            self.apply_ui_transitions(transitions, ctx);
+        }
+    }
+
     fn populate_scene_context(&mut self, ctx: &mut SceneContext, delta_time: f32) {
         use formosaic_engine::rendering::render_state::HintRenderState;
         let solved   = self.game_state == GameState::Solved && !self.is_in_menu();
         let solved_t = self.solved_timer;
         ctx.lights       = self.scene_lights;
-        ctx.show_menu    = self.is_in_menu();
         ctx.is_touch     = cfg!(target_os = "android");
         ctx.delta_time   = delta_time;
+        ctx.show_menu    = self.ui_machine.screen() == UiScreen::MainMenu;
         ctx.solved_timer = if solved { Some(solved_t) } else { None };
         ctx.hints        = self.last_hint_output.as_ref().map(|o| HintRenderState {
             warmth:       o.warmth,
@@ -964,7 +1003,7 @@ impl Application for Formosaic {
 
             self.loading_progress = progress.clamp(0.0, 1.0);
             ui.download_progress = Some(self.loading_progress);
-            ui.show_menu      = self.is_in_menu();
+            ui.screen = self.ui_machine.screen();
             ui.is_touch       = cfg!(target_os = "android");
             ui.levels         = self.registry.levels.clone();
             ui.current_level  = match &self.mode {
@@ -973,7 +1012,7 @@ impl Application for Formosaic {
                 }
                 _ => None,
             };
-            // Don't clear queued_events here — on_update drains them.
+            // UI actions are drained in on_update.
         }
     }
 

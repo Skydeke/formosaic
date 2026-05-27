@@ -2,13 +2,14 @@ use std::{cell::RefCell, rc::Rc};
 use formosaic_engine::architecture::scene::node::{ui_node::UiNode, scenegraph::Scenegraph};
 use imgui::*;
 use crate::formosaic::UiState;
+use crate::ui::state_machine::UiScreen;
 use crate::puzzle::hints::HintTier;
 use super::util::{Scale, self as util};
 
 pub fn register(scene: &Scenegraph, state: Rc<RefCell<UiState>>) {
     let hints_node = UiNode::new("hint_warmth", move |ui, w, h, _ctx| {
         let s = state.borrow();
-        if s.show_menu { return; }
+        if s.screen != UiScreen::Game { return; }
         if s.hint_tier == HintTier::None { return; }
         let scale = Scale::from_screen(w, h, s.is_touch);
 

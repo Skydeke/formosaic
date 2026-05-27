@@ -1,14 +1,14 @@
 use std::{cell::RefCell, rc::Rc};
 use formosaic_engine::architecture::scene::node::{ui_node::UiNode, scenegraph::Scenegraph};
-use formosaic_engine::input::{Event, Key};
 use imgui::*;
 use crate::formosaic::UiState;
+use crate::ui::state_machine::{UiInput, UiScreen};
 use super::util::{Scale, self as util};
 
 pub fn register(scene: &Scenegraph, state: Rc<RefCell<UiState>>) {
-    let credits = UiNode::new("credits", move |ui, w, h, _ctx| {
+    let credits = UiNode::new("credits", move |ui, w, h, ctx| {
         let s = state.borrow();
-        if s.show_menu || !s.is_solved { return; }
+        if s.screen != UiScreen::Credits || !s.is_solved { return; }
         let Some(level) = &s.current_level else { return; };
         let scale = Scale::from_screen(w, h, s.is_touch);
         let level_name = level.name.clone();
@@ -44,8 +44,8 @@ pub fn register(scene: &Scenegraph, state: Rc<RefCell<UiState>>) {
             });
         drop(_win_bg);
         drop(_wp);
-        if open_link { state.borrow_mut().open_url = Some(level_source); }
-        if go_menu { state.borrow_mut().queued_events.push(Event::KeyDown { key: Key::Escape }); }
+        if open_link { ctx.push_ui_action(UiInput::ArtistLinkPressed(level_source)); }
+        if go_menu { ctx.push_ui_action(UiInput::BackToMenuPressed); }
     });
     scene.add_node(Rc::new(RefCell::new(credits)));
 }
