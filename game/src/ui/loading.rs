@@ -25,8 +25,7 @@ pub fn register(scene: &Scenegraph, state: Rc<RefCell<UiState>>) {
             .build(|| {
                 util::title(ui, "Loading level...");
                 util::gap(ui, scale.gap_sm());
-                let p = s.download_progress.unwrap_or(0.0);
-                if p > 0.0 {
+                if let Some(p) = s.download_progress {
                     let _pb = ui.push_style_color(imgui::StyleColor::PlotHistogram, [0.68, 0.48, 0.12, 0.85]);
                     imgui::ProgressBar::new(p)
                         .size([bar_w, scale.bar_h()])

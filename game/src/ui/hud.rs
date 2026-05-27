@@ -24,7 +24,6 @@ pub fn register(scene: &Scenegraph, state: Rc<RefCell<UiState>>) {
                     ui.text_colored([0.9, 0.6, 0.2, 0.8], label);
                 }
                 if s.is_solved      { ui.text_colored([0.2, 0.9, 0.5, 1.0], "SOLVED!"); }
-                if s.is_downloading { ui.text_colored([0.4, 0.7, 1.0, 0.8], "Fetching..."); }
             });
 
         if !s.is_touch {

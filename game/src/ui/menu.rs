@@ -44,10 +44,6 @@ pub fn register(scene: &Scenegraph, state: Rc<RefCell<UiState>>) {
                     ui.child_window("##hdr").size([w, title_h]).scroll_bar(false).border(false).build(|| {
                         ui.set_cursor_pos([pad, (title_h - 16.0) * 0.5]);
                         ui.text_colored([0.85, 0.62, 0.18, 1.0], "FORMOSAIC");
-                        if is_dl {
-                            ui.same_line_with_spacing(0.0, pad);
-                            ui.text_colored([0.4, 0.75, 1.0, 0.9], "Fetching...");
-                        }
                     });
                     drop(_tok);
 
@@ -131,11 +127,6 @@ pub fn register(scene: &Scenegraph, state: Rc<RefCell<UiState>>) {
 
                         ui.set_cursor_pos([pad, (bar_h - 14.0) * 0.5]);
                         ui.text_colored([0.85, 0.62, 0.18, 1.0], "FORMOSAIC");
-                        if is_dl {
-                            ui.same_line_with_spacing(0.0, pad);
-                            ui.set_cursor_pos([ui.cursor_pos()[0], (bar_h - 14.0) * 0.5]);
-                            ui.text_colored([0.4, 0.75, 1.0, 0.9], "Fetching...");
-                        }
                         ui.set_cursor_pos([w - ver_w - pad, (bar_h - 13.0) * 0.5]);
                         ui.text_colored([0.28, 0.34, 0.46, 0.6], "v0.1");
                         ui.set_cursor_pos([r_x, scale.su(2.0)]);

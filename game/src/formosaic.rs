@@ -131,6 +131,7 @@ enum GameState {
 enum AppMode {
     LevelSelect,
     InGame  { level_id: String },
+    FetchingOnline,
     Downloading { summary: ModelSummary },
     Loading { level_id: String },
     Building { level_id: String },
@@ -177,6 +178,8 @@ pub struct Formosaic {
     load_seq:         u64,
     loading_frames:   u32,
     loading_started:  Option<Instant>,
+    loading_progress: f32,
+    latest_download_progress: Option<crate::level::poly_pizza::DownloadProgress>,
     load_tx:          Sender<LoadResult>,
     load_rx:          Receiver<LoadResult>,
     pending_load:            Option<PendingLoad>,
@@ -219,6 +222,8 @@ impl Formosaic {
             load_seq: 0,
             loading_frames: 0,
             loading_started: None,
+            loading_progress: 0.0,
+            latest_download_progress: None,
             load_tx,
             load_rx,
             pending_load: None,
@@ -237,10 +242,7 @@ impl Formosaic {
     // ── Level loading ──────────────────────────────────────────────────────
 
     fn load_model_from_bytes(&mut self, path: &str, level_id: &str, preloaded: Option<&[u8]>, ctx: &mut SceneContext) {
-        // Clear scene then immediately re-register UiNodes — they live in the
-        // scenegraph and scene.clear() would otherwise wipe them on every load.
-        if let Some(scene) = ctx.scene() { scene.clear(); }
-        self.register_ui_nodes(ctx);
+        self.sync_scenegraph(ctx);
         self.model  = None;
         self.entity = None;
         self.orbit  = None;
@@ -320,7 +322,6 @@ impl Formosaic {
             let entity_rot = entity.borrow().transform().rotation;
             let solution_dir = (entity_rot * axis).normalize();
             self.scramble_state = Some(ScrambleState { solution_dir, params });
-            scene.add_node(entity.clone());
             self.entity = Some(entity.clone());
 
             let camera = ctx.camera();
@@ -331,6 +332,10 @@ impl Formosaic {
             camera.borrow_mut().transform.look_at(centroid, Vector3::unit_y());
             self.orbit = Some(OrbitController::new(centroid, dist));
             camera.borrow_mut().set_controller(Some(Box::new(ctrl)));
+
+            if !self.is_in_menu() {
+                scene.add_node(entity.clone());
+            }
         }
 
         self.model = Some(model);
@@ -338,6 +343,7 @@ impl Formosaic {
         self.level_start = Some(Instant::now());
         self.elapsed_secs = 0.0;
         self.mode = AppMode::InGame { level_id };
+        self.sync_scenegraph(ctx);
         self.solved_timer = 0.0;
         self.loading_started = None;
     }
@@ -383,6 +389,11 @@ impl Formosaic {
 
     fn fetch_online_level(&mut self) {
         if !self.client.is_explore_pending() {
+            self.mode = AppMode::FetchingOnline;
+            self.loading_started = Some(Instant::now());
+            self.loading_frames = 0;
+            self.loading_progress = 0.0;
+            self.latest_download_progress = None;
             // Page 0 is fetched first to discover total, then a random valid
             // page is chosen — all handled inside fetch_explore.
             self.client.fetch_explore_page(0, 20);
@@ -401,14 +412,15 @@ impl Formosaic {
         self.mode = AppMode::Loading { level_id: level_id.clone() };
         self.loading_frames = 0;
         self.loading_started = Some(Instant::now());
+        self.loading_progress = 0.0;
+        self.latest_download_progress = None;
         self.model = None;
         self.entity = None;
         self.orbit = None;
         self.scramble_state = None;
         self.entropy_report = None;
         self.hints.reset();
-        if let Some(scene) = ctx.scene() { scene.clear(); }
-        self.register_ui_nodes(ctx);
+        self.sync_scenegraph(ctx);
         let tx = self.load_tx.clone();
         std::thread::spawn(move || {
             if let Ok(bytes) = std::fs::read(&path) {
@@ -482,6 +494,8 @@ impl Formosaic {
         if let Some(model) = &self.model {
             model.borrow_mut().pick_solve_animation();
         }
+
+        self.sync_scenegraph(ctx);
     }
 
     // ── Download polling ────────────────────────────────────────────────────
@@ -522,6 +536,12 @@ impl Formosaic {
                     self.client.fetch_explore_page(0, 20);
                     self.mode = AppMode::LevelSelect;
                 }
+            }
+        }
+
+        while let Some(result) = self.client.poll_download_progress() {
+            if let Ok(progress) = result {
+                self.latest_download_progress = Some(progress);
             }
         }
     }
@@ -570,14 +590,15 @@ impl Formosaic {
         self.mode = AppMode::Loading { level_id: level_id.clone() };
         self.loading_frames = 0;
         self.loading_started = Some(Instant::now());
+        self.loading_progress = 0.0;
+        self.latest_download_progress = None;
         self.model = None;
         self.entity = None;
         self.orbit = None;
         self.scramble_state = None;
         self.entropy_report = None;
         self.hints.reset();
-        if let Some(scene) = ctx.scene() { scene.clear(); }
-        self.register_ui_nodes(ctx);
+        self.sync_scenegraph(ctx);
         let tx = self.load_tx.clone();
         std::thread::spawn(move || {
             let data = ModelLoader::prepare_from_bytes_with_path(&path, &bytes);
@@ -611,7 +632,7 @@ impl Formosaic {
 
     /// True when the level-select / menu overlay should be shown.
     pub fn is_in_menu(&self) -> bool {
-        matches!(self.mode, AppMode::LevelSelect | AppMode::Loading { .. } | AppMode::Building { .. })
+        matches!(self.mode, AppMode::LevelSelect | AppMode::FetchingOnline | AppMode::Loading { .. } | AppMode::Building { .. } | AppMode::Downloading { .. })
     }
 
     /// Index of the currently highlighted level in the menu grid.
@@ -627,24 +648,41 @@ impl Formosaic {
     /// Default lighting — used by game_engine for initial GL clear colour.
     pub fn default_lights() -> LightConfig { LightConfig::default() }
 
-    // ── UiNode registration ────────────────────────────────────────────────
+    // ── Scene composition ──────────────────────────────────────────────────
     //
-    // Each panel extracted to game/src/ui/{panel}.rs — each creates its own
-    // UiNode and registers it with the scenegraph.
-    //
-    // Panel registration order determines z-order:
-    //   hud → hint_warmth → touch_buttons → menu → credits → loading
+    // We keep only the nodes needed for the current state in the scenegraph.
+    // That avoids stale entities/UI surviving state transitions.
 
-    fn register_ui_nodes(&self, ctx: &mut SceneContext) {
+    fn register_menu_scene(&self, ctx: &mut SceneContext) {
+        let Some(scene) = ctx.scene() else { return };
+        let state = Rc::clone(&self.ui_state);
+        crate::ui::menu::register(scene, Rc::clone(&state));
+        crate::ui::credits::register(scene, Rc::clone(&state));
+        crate::ui::loading::register(scene, Rc::clone(&state));
+    }
+
+    fn register_game_scene(&self, ctx: &mut SceneContext) {
         let Some(scene) = ctx.scene() else { return };
         let state = Rc::clone(&self.ui_state);
         crate::ui::hud::register(scene, Rc::clone(&state));
         crate::ui::hint_warmth::register(scene, Rc::clone(&state));
         #[cfg(target_os = "android")]
         crate::ui::touch_buttons::register(scene, Rc::clone(&state));
-        crate::ui::menu::register(scene, Rc::clone(&state));
         crate::ui::credits::register(scene, Rc::clone(&state));
-        crate::ui::loading::register(scene, Rc::clone(&state));
+        if let Some(entity) = &self.entity {
+            scene.add_node(entity.clone());
+        }
+    }
+
+    fn sync_scenegraph(&self, ctx: &mut SceneContext) {
+        if let Some(scene) = ctx.scene() {
+            scene.clear();
+        }
+        if self.is_in_menu() {
+            self.register_menu_scene(ctx);
+        } else {
+            self.register_game_scene(ctx);
+        }
     }
 }
 impl Default for Formosaic { fn default() -> Self { Self::new() } }
@@ -660,7 +698,7 @@ impl Application for Formosaic {
     fn on_init(&mut self, ctx: &mut SceneContext) {
         log::info!("[Formosaic] on_init");
         self.seed_builtin_levels();
-        self.register_ui_nodes(ctx);
+        self.sync_scenegraph(ctx);
 
         // On resume after GL context loss, re-load the current level so
         // fresh GPU resources (VAOs, textures) are created for the new context.
@@ -707,7 +745,7 @@ impl Application for Formosaic {
         }
 
         // Track elapsed frames in loading/building states.
-        if matches!(self.mode, AppMode::Loading { .. } | AppMode::Building { .. }) {
+        if matches!(self.mode, AppMode::Loading { .. } | AppMode::Building { .. } | AppMode::FetchingOnline) {
             self.loading_frames = self.loading_frames.saturating_add(1);
         }
 
@@ -860,6 +898,7 @@ impl Application for Formosaic {
                 self.pending_axis = None;
                 self.pending_report = None;
                 self.pending_params = None;
+                self.sync_scenegraph(ctx);
             }
             _ => {
                 if matches!(self.game_state, GameState::Playing | GameState::Solved) {
@@ -900,23 +939,31 @@ impl Application for Formosaic {
             ui.hint_warmth    = self.last_hint_output.as_ref().map(|o| o.warmth).unwrap_or(0.5);
             ui.is_solved      = self.game_state == GameState::Solved;
             ui.is_downloading = matches!(self.mode, AppMode::Downloading { .. }) || self.client.is_download_pending();
-            ui.is_loading     = matches!(self.mode, AppMode::Loading { .. } | AppMode::Building { .. });
-            ui.download_progress = if matches!(self.mode, AppMode::Loading { .. }) {
-                // Phase 1: background thread parsing — capped at 30%.
+            ui.is_loading     = matches!(self.mode, AppMode::Loading { .. } | AppMode::Building { .. } | AppMode::Downloading { .. } | AppMode::FetchingOnline);
+
+            let mut progress = self.loading_progress;
+            if matches!(self.mode, AppMode::Loading { .. } | AppMode::FetchingOnline) {
+                // Move continuously while the background thread works.
                 let t = self.loading_started.map(|start| start.elapsed().as_secs_f32()).unwrap_or(0.0);
-                Some((t / 2.0).clamp(0.05, 0.30))
-            } else if self.pending_finalize_builder.is_some() {
-                // Deferred finalization frame — all GPU work done, bar at 99%.
-                Some(0.99)
+                progress = progress.max((t / 6.0).clamp(0.05, 0.45));
+            }
+            if let Some(p) = self.latest_download_progress.as_ref() {
+                let phase = if matches!(self.mode, AppMode::Downloading { .. }) { 0.50 } else { 0.45 };
+                if let Some(total) = p.total_bytes {
+                    progress = progress.max(phase + (p.downloaded_bytes as f32 / total as f32).clamp(0.0, 1.0) * 0.45);
+                } else {
+                    progress = progress.max(phase + (p.downloaded_bytes as f32 / 20_000_000.0).clamp(0.0, 0.45));
+                }
+            }
+            if self.pending_finalize_builder.is_some() {
+                progress = progress.max(0.99);
             } else if let AppMode::Building { .. } = &self.mode {
-                // Phase 2: incremental GPU upload — real progress, 30% → 95%.
                 let p = self.incremental_builder.as_ref().map(|b| b.progress()).unwrap_or(0.0);
-                Some(0.30 + p * 0.65)
-            } else if ui.is_downloading {
-                Some((self.client.download_progress_bytes() as f32 / 1_000_000.0).clamp(0.0, 0.95))
-            } else {
-                None
-            };
+                progress = progress.max(0.50 + p * 0.49);
+            }
+
+            self.loading_progress = progress.clamp(0.0, 1.0);
+            ui.download_progress = Some(self.loading_progress);
             ui.show_menu      = self.is_in_menu();
             ui.is_touch       = cfg!(target_os = "android");
             ui.levels         = self.registry.levels.clone();
