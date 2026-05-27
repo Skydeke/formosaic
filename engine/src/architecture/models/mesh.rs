@@ -18,6 +18,9 @@ pub struct Mesh {
     vao:              Vao,
     material:         Option<Material>,
     has_vertex_colors: bool,
+    bone_indices:     Vec<[i32; 4]>,
+    bone_weights:     Vec<[f32; 4]>,
+    is_skinned:       bool,
 }
 
 impl Mesh {
@@ -31,6 +34,8 @@ impl Mesh {
         texcoords: Vec<f32>,
         indices:   Vec<u32>,
         colors:    Vec<f32>,
+        bone_indices: Vec<[i32; 4]>,
+        bone_weights: Vec<[f32; 4]>,
     ) -> Self {
         let tri_count  = indices.len() / 3;
         let vert_count = tri_count * 3;
@@ -39,6 +44,11 @@ impl Mesh {
         let mut flat_norm   = Vec::with_capacity(vert_count * 3);
         let mut flat_tex    = Vec::with_capacity(if texcoords.is_empty() { 0 } else { vert_count * 2 });
         let mut flat_colors = Vec::with_capacity(if colors.is_empty()    { 0 } else { vert_count * 4 });
+        let has_bones = bone_indices
+            .iter()
+            .any(|indices| indices.iter().any(|&idx| idx >= 0));
+        let mut flat_bone_indices = Vec::with_capacity(if has_bones { vert_count } else { 0 });
+        let mut flat_bone_weights = Vec::with_capacity(if has_bones { vert_count } else { 0 });
         let use_face_normals = normals.is_empty();
 
         for tri in 0..tri_count {
@@ -99,6 +109,10 @@ impl Mesh {
                     flat_colors.push(colors[vi * 4 + 2]);
                     flat_colors.push(colors[vi * 4 + 3]);
                 }
+                if has_bones {
+                    flat_bone_indices.push(bone_indices[vi]);
+                    flat_bone_weights.push(bone_weights[vi]);
+                }
             }
         }
 
@@ -145,6 +159,36 @@ impl Mesh {
             vao.load_data_buffer(Rc::new(buf), &[Attribute::of(5, 4, DataType::Float, false)]);
         }
 
+        // location 3: bone indices (ivec4)
+        if has_bones {
+            let mut buf = DataBuffer::new(VboUsage::StaticDraw);
+            buf.allocate_int(flat_bone_indices.len() * 4);
+            let flat: Vec<i32> = flat_bone_indices.iter().flat_map(|arr| arr.iter()).copied().collect();
+            buf.store_int(0, &flat);
+            vao.load_data_buffer(Rc::new(buf), &[Attribute::of(3, 4, DataType::Int, false)]);
+        } else {
+            let mut buf = DataBuffer::new(VboUsage::StaticDraw);
+            let zeros: Vec<i32> = vec![0; vert_count * 4];
+            buf.allocate_int(zeros.len());
+            buf.store_int(0, &zeros);
+            vao.load_data_buffer(Rc::new(buf), &[Attribute::of(3, 4, DataType::Int, false)]);
+        }
+
+        // location 4: bone weights (vec4)
+        if has_bones {
+            let mut buf = DataBuffer::new(VboUsage::StaticDraw);
+            buf.allocate_float(flat_bone_weights.len() * 4);
+            let flat: Vec<f32> = flat_bone_weights.iter().flat_map(|arr| arr.iter()).copied().collect();
+            buf.store_float(0, &flat);
+            vao.load_data_buffer(Rc::new(buf), &[Attribute::of(4, 4, DataType::Float, false)]);
+        } else {
+            let mut buf = DataBuffer::new(VboUsage::StaticDraw);
+            let weights: Vec<f32> = (0..vert_count).flat_map(|_| [1.0f32, 0.0, 0.0, 0.0]).collect();
+            buf.allocate_float(weights.len());
+            buf.store_float(0, &weights);
+            vao.load_data_buffer(Rc::new(buf), &[Attribute::of(4, 4, DataType::Float, false)]);
+        }
+
         let n    = flat_pos.len();
         let vert = flat_pos.clone();
         Self {
@@ -156,6 +200,9 @@ impl Mesh {
             vao,
             material: None,
             has_vertex_colors,
+            bone_indices: flat_bone_indices,
+            bone_weights: flat_bone_weights,
+            is_skinned: has_bones,
         }
     }
 
@@ -170,6 +217,9 @@ impl Mesh {
             vao,
             material: None,
             has_vertex_colors: false,
+            bone_indices: vec![],
+            bone_weights: vec![],
+            is_skinned: false,
         }
     }
 
@@ -225,8 +275,11 @@ impl Mesh {
 
     pub fn positions(&self)          -> &[f32]         { &self.positions }
     pub fn has_vertex_colors(&self)  -> bool           { self.has_vertex_colors }
+    pub fn is_skinned(&self)         -> bool           { self.is_skinned }
     pub fn set_material(&mut self, mat: Material)      { self.material = Some(mat); }
     pub fn material(&self)           -> Option<&Material> { self.material.as_ref() }
+    pub fn bone_indices(&self)       -> &[[i32; 4]]    { &self.bone_indices }
+    pub fn bone_weights(&self)       -> &[[f32; 4]]    { &self.bone_weights }
 
     pub fn delete(&mut self, delete_vbos: bool) {
         self.vao.delete(delete_vbos);
@@ -310,5 +363,3 @@ pub fn lerp_positions(positions: &[f32], offsets: &[f32], t: f32) -> Vec<f32> {
     }
     data
 }
-
-

@@ -34,7 +34,7 @@ void main() {
     }
 
     albedo.a *= uOpacity;
-    if (albedo.a < uAlphaCutoff) discard;
+    if (uAlphaCutoff > 0.0 && albedo.a < uAlphaCutoff) discard;
 
     gAlbedo = albedo;
 

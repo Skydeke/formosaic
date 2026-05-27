@@ -1,6 +1,9 @@
+pub mod animation;
+pub mod animation_player;
 pub mod material;
 pub mod mesh;
 pub mod model;
 pub mod model_cache;
 pub mod model_loader;
 pub mod simple_model;
+pub mod skeleton;

@@ -1,7 +1,10 @@
-use cgmath::{Matrix4, Vector3, Vector4};
+use cgmath::{Matrix4, SquareMatrix, Vector3, Vector4};
 
+use crate::architecture::models::animation::AnimationClip;
+use crate::architecture::models::animation_player::AnimationPlayer;
 use crate::architecture::models::mesh::Mesh;
 use crate::architecture::models::model::Model;
+use crate::architecture::models::skeleton::Skeleton;
 use crate::opengl::constants::render_mode::RenderMode;
 use crate::opengl::shaders::RenderState;
 use crate::rendering::abstracted::processable::Processable;
@@ -89,6 +92,10 @@ pub struct SimpleModel {
     render_mode: RenderMode,
     centroid: Option<Vector3<f32>>,
     mesh_transforms: Vec<Matrix4<f32>>,
+    pub skeleton: Option<Skeleton>,
+    pub animations: Vec<AnimationClip>,
+    pub player: AnimationPlayer,
+    bone_matrices: Vec<Matrix4<f32>>,
 }
 
 impl SimpleModel {
@@ -110,6 +117,10 @@ impl SimpleModel {
             render_mode,
             centroid: Some(centroid),
             mesh_transforms: vec![Matrix4::from_scale(1.0); mesh_count],
+            skeleton: None,
+            animations: Vec::new(),
+            player: AnimationPlayer::new(),
+            bone_matrices: Vec::new(),
         }
     }
 
@@ -123,6 +134,10 @@ impl SimpleModel {
             render_mode,
             centroid: None,
             mesh_transforms: vec![Matrix4::from_scale(1.0); mesh_count],
+            skeleton: None,
+            animations: Vec::new(),
+            player: AnimationPlayer::new(),
+            bone_matrices: Vec::new(),
         }
     }
 
@@ -140,11 +155,120 @@ impl SimpleModel {
             render_mode,
             centroid,
             mesh_transforms,
+            skeleton: None,
+            animations: Vec::new(),
+            player: AnimationPlayer::new(),
+            bone_matrices: Vec::new(),
         }
     }
 
     pub fn meshes(&self) -> &[Mesh] {
         &self.meshes
+    }
+
+    pub fn set_animation_data(&mut self, skeleton: Option<Skeleton>, animations: Vec<AnimationClip>) {
+        self.skeleton = skeleton;
+        self.animations = animations;
+        let bone_count = self.skeleton.as_ref().map(|s| s.bone_count()).unwrap_or(0);
+        self.bone_matrices = vec![Matrix4::identity(); bone_count.max(1)];
+    }
+
+    pub fn update_animation(&mut self, dt: f32) {
+        if let Some(ref mut skel) = self.skeleton {
+            if log::log_enabled!(log::Level::Debug) {
+                log::debug!(
+                    "[SimpleModel] update_animation dt={:.4} clip={:?} playing={} bones={} anims={}",
+                    dt,
+                    self.player.clip.as_ref().map(|c| c.name.as_str()),
+                    self.player.playing,
+                    skel.bone_count(),
+                    self.animations.len(),
+                );
+            }
+            self.player.update(dt);
+            self.bone_matrices = self.player.evaluate(skel);
+            if log::log_enabled!(log::Level::Debug) {
+                log::debug!(
+                    "[SimpleModel] bone_matrices computed count={} has_clip={}",
+                    self.bone_matrices.len(),
+                    self.player.has_clip(),
+                );
+            }
+        }
+    }
+
+    pub fn bone_matrices(&self) -> &[Matrix4<f32>] {
+        if self.skeleton.is_some() && self.player.has_clip() {
+            &self.bone_matrices
+        } else {
+            &[]
+        }
+    }
+
+    pub fn animations(&self) -> &[AnimationClip] {
+        &self.animations
+    }
+
+    pub fn pick_random_animation(&mut self) {
+        if self.animations.is_empty() {
+            log::debug!("[SimpleModel] pick_random_animation skipped: no animations");
+            return;
+        }
+        use rand::Rng;
+        let idx = rand::rng().random_range(0..self.animations.len());
+        if log::log_enabled!(log::Level::Debug) {
+            let names: Vec<&str> = self.animations.iter().map(|a| a.name.as_str()).collect();
+            log::debug!(
+                "[SimpleModel] available animations: {:?}",
+                names,
+            );
+        }
+        log::debug!(
+            "[SimpleModel] pick_random_animation idx={} name='{}' duration_ticks={:.3} tps={:.3} channels={}",
+            idx,
+            self.animations[idx].name,
+            self.animations[idx].duration_ticks,
+            self.animations[idx].ticks_per_second,
+            self.animations[idx].channels.len(),
+        );
+        self.player.play(self.animations[idx].clone());
+    }
+
+    pub fn pick_solve_animation(&mut self) {
+        if self.animations.is_empty() {
+            log::debug!("[SimpleModel] pick_solve_animation skipped: no animations");
+            return;
+        }
+
+        let prefer = ["idle", "interact", "pose", "stand", "celebrat", "victory", "win", "success"];
+        let avoid = ["run", "walk", "jump", "fall", "hit", "punch", "attack", "roll", "hurt"];
+
+        let chosen = self
+            .animations
+            .iter()
+            .enumerate()
+            .filter(|(_, clip)| {
+                let n = clip.name.to_lowercase();
+                !avoid.iter().any(|k| n.contains(k))
+            })
+            .max_by_key(|(_, clip)| {
+                let n = clip.name.to_lowercase();
+                prefer.iter().position(|k| n.contains(k)).map(|i| 100 - i as i32).unwrap_or(0)
+            })
+            .map(|(idx, clip)| (idx, clip.clone()))
+            .or_else(|| self.animations.first().cloned().map(|clip| (0, clip)));
+
+        let Some((idx, clip)) = chosen else { return; };
+
+        log::info!(
+            "[SimpleModel] pick_solve_animation idx={} name='{}' duration_ticks={:.3} tps={:.3} channels={}",
+            idx,
+            clip.name,
+            clip.duration_ticks,
+            clip.ticks_per_second,
+            clip.channels.len(),
+        );
+        self.player.play(clip);
     }
 
     /// Analyse the model geometry and return parameters suitable for puzzle setup.
@@ -180,61 +304,37 @@ impl SimpleModel {
                 let x = p.x;
                 let y = p.y;
                 let z = p.z;
-                if x < min.x {
-                    min.x = x;
-                }
-                if y < min.y {
-                    min.y = y;
-                }
-                if z < min.z {
-                    min.z = z;
-                }
-                if x > max.x {
-                    max.x = x;
-                }
-                if y > max.y {
-                    max.y = y;
-                }
-                if z > max.z {
-                    max.z = z;
-                }
+                if x < min.x { min.x = x; }
+                if y < min.y { min.y = y; }
+                if z < min.z { min.z = z; }
+                if x > max.x { max.x = x; }
+                if y > max.y { max.y = y; }
+                if z > max.z { max.z = z; }
                 i += 3;
             }
         }
 
-        // Fallback for empty models.
         if min.x == f32::INFINITY {
             return PuzzleParams::default_for(target_world_radius);
         }
 
         let extent = max - min;
-        let model_radius = extent.magnitude() * 0.5; // half diagonal = bounding sphere
+        let model_radius = extent.magnitude() * 0.5;
         let model_radius = model_radius.max(0.001);
 
-        // ── Derived parameters ────────────────────────────────────────────────
-        // Scale so the bounding sphere matches the target world radius.
         let entity_scale = target_world_radius / model_radius;
-
-        // Camera distance: model fills ~65% of the view frustum height.
-        // half_fov gives the half-angle; tan(half_fov) * distance = world_radius.
         let half_fov = fov_radians * 0.5;
         let orbit_distance = target_world_radius / (half_fov.tan() * 0.65);
-
-        // Small enough that near-solution the gaps are tiny; large enough to be
-        // clearly visible from the side.
-        let min_disp = model_radius * 0.02;
-        let max_disp = model_radius * 0.12;
 
         PuzzleParams {
             entity_scale,
             orbit_distance,
-            min_disp,
-            max_disp,
+            min_disp: model_radius * 0.02,
+            max_disp: model_radius * 0.12,
             model_space_radius: model_radius,
         }
     }
 
-    /// Scramble all meshes: offset every triangle by a random amount along `axis`.
     pub fn scramble_along_axis(&mut self, axis: Vector3<f32>, min_disp: f32, max_disp: f32) {
         for (mesh_idx, mesh) in self.meshes.iter_mut().enumerate() {
             let mesh_transform = self
@@ -247,8 +347,6 @@ impl SimpleModel {
         }
     }
 
-    /// Upload positions lerped between scrambled (t=1.0) and original (t=0.0).
-    /// Drive this every frame during the unscramble animation.
     pub fn upload_lerp(&self, t: f32) {
         for mesh in &self.meshes {
             mesh.upload_lerp(t);
@@ -262,7 +360,6 @@ impl SimpleModel {
     }
 }
 
-// Implement Model trait
 impl Model for SimpleModel {
     fn render<T: Processable>(&self, _instance_state: &RenderState<T>, mesh_idx: usize) {
         let mesh = &self.meshes[mesh_idx];
@@ -314,5 +411,24 @@ impl Model for SimpleModel {
 
     fn mesh_transform(&self, mesh_idx: usize) -> Option<Matrix4<f32>> {
         self.mesh_transforms.get(mesh_idx).copied()
+    }
+
+    fn bone_matrices(&self) -> &[Matrix4<f32>] {
+        if self.skeleton.is_some() && self.player.has_clip() {
+            &self.bone_matrices
+        } else {
+            &[]
+        }
+    }
+
+    fn update_animation(&mut self, dt: f32) {
+        if let Some(ref mut skel) = self.skeleton {
+            self.player.update(dt);
+            self.bone_matrices = self.player.evaluate(skel);
+        }
+    }
+
+    fn animations(&self) -> &[AnimationClip] {
+        &self.animations
     }
 }

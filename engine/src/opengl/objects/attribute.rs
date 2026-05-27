@@ -101,21 +101,59 @@ impl Attribute {
         }
     }
 
-    /// Link the attribute to a VBO with a stride and offset
+    /// Link the attribute to a VBO with a stride and offset.
+    ///
+    /// **Non-normalized** integer GL types (INT, UNSIGNED_INT, …) must be
+    /// linked with `VertexAttribIPointer` so the shader receives raw integer
+    /// values in `ivec` inputs.  Using `VertexAttribPointer` for those types
+    /// causes the driver to silently reinterpret the bits as floats, producing
+    /// garbage bone indices — the root cause of broken skinning.
+    ///
+    /// **Normalized** integer types (e.g. UNSIGNED_BYTE with normalized=true,
+    /// as used by ImGui for packed RGBA colors) must still go through
+    /// `VertexAttribPointer`: the whole point is that 0-255 gets mapped to
+    /// [0, 1] as a float.  `VertexAttribIPointer` does not normalize, so
+    /// using it here would send raw 0-255 integers to a `vec4` input and
+    /// make the UI invisible.
     pub fn link(&self, stride: GLint, offset: GLint) {
         unsafe {
-            gl::VertexAttribPointer(
-                self.attribute_index,
-                self.component_count,
-                self.components_type,
-                self.normalized as GLboolean,
-                stride,
-                offset as *const _,
-            );
+            if Self::is_integer_gl_type(self.components_type) && !self.normalized {
+                gl::VertexAttribIPointer(
+                    self.attribute_index,
+                    self.component_count,
+                    self.components_type,
+                    stride,
+                    offset as *const _,
+                );
+            } else {
+                gl::VertexAttribPointer(
+                    self.attribute_index,
+                    self.component_count,
+                    self.components_type,
+                    self.normalized as GLboolean,
+                    stride,
+                    offset as *const _,
+                );
+            }
             if self.instances > 0 {
                 gl::VertexAttribDivisor(self.attribute_index, self.instances);
             }
         }
+    }
+
+    /// Returns `true` for GL types that are integer-backed.
+    /// Combine with `!self.normalized` to decide whether `VertexAttribIPointer`
+    /// is required.
+    fn is_integer_gl_type(gl_type: GLenum) -> bool {
+        matches!(
+            gl_type,
+            gl::BYTE
+                | gl::UNSIGNED_BYTE
+                | gl::SHORT
+                | gl::UNSIGNED_SHORT
+                | gl::INT
+                | gl::UNSIGNED_INT
+        )
     }
 
     /// Static helpers for enabling/disabling by index

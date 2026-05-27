@@ -282,6 +282,8 @@ impl Formosaic {
         self.finalize_loaded_model(level_id.to_string(), builder, search.axis, search.report, params, ctx);
     }
 
+
+
     fn finalize_loaded_model(
         &mut self,
         level_id: String,
@@ -475,6 +477,11 @@ impl Formosaic {
             _ => return,
         };
         self.registry.record_completion(&level_id, self.elapsed_secs);
+
+        // Play a non-locomotion animation on solve
+        if let Some(model) = &self.model {
+            model.borrow_mut().pick_solve_animation();
+        }
     }
 
     // ── Download polling ────────────────────────────────────────────────────
@@ -771,6 +778,11 @@ impl Application for Formosaic {
             None
         };
 
+        // Advance per-frame animation (skinning / bone matrices).
+        if let Some(model) = &self.model {
+            model.borrow_mut().update_animation(delta_time);
+        }
+
         let mut do_solve           = false;
         let mut do_restore_complete = false;
         let mut cam_pos:            Option<Vector3<f32>> = None;
@@ -1035,5 +1047,3 @@ pub fn camera_scramble_t(dot: f32) -> f32 {
         1.0
     }
 }
-
-

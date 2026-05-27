@@ -1,5 +1,6 @@
 use cgmath::{Matrix4, Vector3};
 
+use crate::architecture::models::animation::AnimationClip;
 use crate::rendering::abstracted::processable::Processable;
 use crate::{
     architecture::models::{material::Material, mesh::Mesh},
@@ -36,5 +37,18 @@ pub trait Model {
             .get(mesh_idx)
             .map(|m| m.has_vertex_colors())
             .unwrap_or(false)
+    }
+
+    /// Bone matrices for GPU skinning. Empty means no skinning.
+    fn bone_matrices(&self) -> &[Matrix4<f32>] {
+        &[]
+    }
+
+    /// Advance per-frame animation state.
+    fn update_animation(&mut self, _dt: f32) {}
+
+    /// Get available animation clips.
+    fn animations(&self) -> &[AnimationClip] {
+        &[]
     }
 }

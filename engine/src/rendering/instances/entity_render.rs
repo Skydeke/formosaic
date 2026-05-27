@@ -8,9 +8,8 @@ use crate::architecture::models::model::Model;
 use crate::architecture::scene::entity::scene_object::SceneObject;
 use crate::architecture::scene::node::node::NodeBehavior;
 use crate::architecture::scene::scene_context::SceneContext;
-use crate::opengl::shaders::uniform::{UniformBoolean, UniformFloat, UniformTexture};
-use crate::opengl::shaders::UniformVec3;
-use crate::opengl::shaders::{uniform::UniformAdapter, RenderState, ShaderProgram, UniformMatrix4};
+use crate::opengl::shaders::uniform::{UniformAdapter, UniformBoolean, UniformFloat, UniformInt, UniformMatrix4Array, UniformTexture};
+use crate::opengl::shaders::{RenderState, ShaderProgram, UniformMatrix4, UniformVec3};
 use crate::rendering::abstracted::irenderer::IRenderer;
 
 pub struct EntityRenderer<T: SceneObject> {
@@ -128,6 +127,20 @@ impl<T: SceneObject + 'static> EntityRenderer<T> {
                     .mesh_material()
                     .map(|mat| mat.roughness_factor)
                     .unwrap_or(0.5)
+            }),
+        }));
+
+        shader_program.add_per_instance_uniform(Box::new(UniformAdapter {
+            uniform: UniformInt::new("uBoneCount"),
+            extractor: Box::new(|state: &RenderState<T>| {
+                state.instance().map(|e| e.get_model().bone_matrices().len() as i32).unwrap_or(0)
+            }),
+        }));
+
+        shader_program.add_per_instance_uniform(Box::new(UniformAdapter {
+            uniform: UniformMatrix4Array::new("uBones", 128),
+            extractor: Box::new(|state: &RenderState<T>| {
+                state.instance().map(|e| e.get_model().bone_matrices().to_vec()).unwrap_or_default()
             }),
         }));
 

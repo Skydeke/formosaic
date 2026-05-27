@@ -6,18 +6,21 @@
 //! Material; the shader decides which to actually sample.
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::rc::Rc;
 
-use cgmath::{Matrix4, Vector3, Vector4};
+use cgmath::{Matrix4, Quaternion, SquareMatrix, Vector3, Vector4};
 use russimp_ng::material::{Material as AiMaterial, PropertyTypeInfo, TextureType};
 use russimp_ng::mesh::Mesh as AiMesh;
 use russimp_ng::scene::{PostProcess, Scene};
 use russimp_ng::node::Node as AiNode;
 
+use crate::architecture::models::animation::{AnimationClip, BoneChannel, PositionKey, RotationKey, ScalingKey};
 use crate::architecture::models::material::{AlphaMode, Material};
 use crate::architecture::models::mesh::Mesh;
 use crate::architecture::models::model_cache::ModelCache;
 use crate::architecture::models::simple_model::SimpleModel;
+use crate::architecture::models::skeleton::{BoneData, Skeleton};
 use crate::opengl::constants::render_mode::RenderMode;
 use crate::opengl::fbos::simple_texture::SimpleTexture;
 use crate::opengl::objects::pbo::{supports_pbo, Pbo};
@@ -59,6 +62,8 @@ pub struct PreparedMesh {
     pub indices: Vec<u32>,
     pub colors: Vec<f32>,
     pub material_index: usize,
+    pub bone_indices: Vec<[i32; 4]>,
+    pub bone_weights: Vec<[f32; 4]>,
 }
 
 /// CPU-side payload used while the loader parses bytes on a worker thread.
@@ -69,6 +74,8 @@ pub struct ModelLoadData {
     pub centroid: Option<Vector3<f32>>,
     pub mesh_transforms: Vec<Matrix4<f32>>,
     pub render_mode: RenderMode,
+    pub skeleton: Option<Skeleton>,
+    pub animations: Vec<AnimationClip>,
 }
 
 impl PreparedMaterial {
@@ -97,11 +104,11 @@ impl PreparedMaterial {
 
 impl ModelLoadData {
     pub fn build(self) -> Rc<RefCell<SimpleModel>> {
-        let ModelLoadData { meshes, materials, centroid, mesh_transforms, render_mode } = self;
+        let ModelLoadData { meshes, materials, centroid, mesh_transforms, render_mode, skeleton, animations } = self;
         let meshes: Vec<Mesh> = meshes
             .into_iter()
             .map(|m| {
-                let mut mesh = Mesh::from_raw(m.positions, m.normals, m.texcoords, m.indices, m.colors);
+                let mut mesh = Mesh::from_raw(m.positions, m.normals, m.texcoords, m.indices, m.colors, m.bone_indices, m.bone_weights);
                 if let Some(prepared) = materials.get(m.material_index) {
                     mesh.set_material(prepared.clone().into_material());
                 }
@@ -109,12 +116,14 @@ impl ModelLoadData {
             })
             .collect();
 
-        Rc::new(RefCell::new(SimpleModel::with_mesh_transforms(
+        let mut model = SimpleModel::with_mesh_transforms(
             meshes,
             render_mode,
             centroid,
             mesh_transforms,
-        )))
+        );
+        model.set_animation_data(skeleton, animations);
+        Rc::new(RefCell::new(model))
     }
 }
 
@@ -176,6 +185,8 @@ impl IncrementalModelBuilder {
                 m.texcoords.clone(),
                 m.indices.clone(),
                 m.colors.clone(),
+                m.bone_indices.clone(),
+                m.bone_weights.clone(),
             );
             self.built_meshes.push((m.material_index, mesh));
             self.next_mesh += 1;
@@ -204,12 +215,14 @@ impl IncrementalModelBuilder {
     /// Only call after `build_next()` has returned `true`.
     pub fn finish(self) -> Rc<RefCell<SimpleModel>> {
         let meshes: Vec<Mesh> = self.built_meshes.into_iter().map(|(_, m)| m).collect();
-        Rc::new(RefCell::new(SimpleModel::with_mesh_transforms(
+        let mut model = SimpleModel::with_mesh_transforms(
             meshes,
             self.data.render_mode,
             self.data.centroid,
             self.data.mesh_transforms,
-        )))
+        );
+        model.set_animation_data(self.data.skeleton, self.data.animations);
+        Rc::new(RefCell::new(model))
     }
 }
 
@@ -271,6 +284,24 @@ impl ModelLoader {
             Self::collect_node_transforms(root, Matrix4::from_scale(1.0), &mut mesh_transforms);
         }
 
+        // ── Build global bone index mapping before processing meshes ──
+        // This ensures per-vertex bone indices reference global skeleton
+        // indices (0, 1, 2, ...) rather than per-mesh local indices.
+        // The ordering must match build_skeleton's bone ordering.
+        let name_to_global_idx: HashMap<String, usize> = {
+            let mut map = HashMap::new();
+            let mut next = 0;
+            for ai_mesh in &scene.meshes {
+                for bone in &ai_mesh.bones {
+                    if !map.contains_key(&bone.name) {
+                        map.insert(bone.name.clone(), next);
+                        next += 1;
+                    }
+                }
+            }
+            map
+        };
+
         let meshes: Vec<PreparedMesh> = scene
             .meshes
             .iter()
@@ -279,7 +310,7 @@ impl ModelLoader {
                     sum += Vector3::new(v.x, v.y, v.z);
                     count += 1;
                 }
-                Self::process_mesh_prepared(m)
+                Self::process_mesh_prepared(m, &name_to_global_idx)
             })
             .collect();
 
@@ -294,12 +325,133 @@ impl ModelLoader {
             .map(|m| m.unwrap_or_else(|| Matrix4::from_scale(1.0)))
             .collect();
 
+        // ── Build skeleton from bone data ─────────────────────────────────
+        let has_bones = meshes.iter().any(|m| m.bone_indices.iter().any(|bi| bi[0] >= 0));
+        let skeleton = if has_bones {
+            Self::build_skeleton(&scene, &meshes)
+        } else {
+            None
+        };
+
+        // ── Extract animations ────────────────────────────────────────────
+        let animations: Vec<AnimationClip> = scene.animations.iter().map(Self::extract_animation).collect();
+
         ModelLoadData {
             meshes,
             materials,
             centroid: Some(centroid),
             mesh_transforms,
             render_mode: RenderMode::Triangles,
+            skeleton,
+            animations,
+        }
+    }
+
+    /// Build a Skeleton from the Assimp scene's node hierarchy and per-mesh bone data.
+    fn build_skeleton(scene: &Scene, _prepared_meshes: &[PreparedMesh]) -> Option<Skeleton> {
+        // Collect unique bone data from scene meshes, preserving insertion order.
+        let mut bone_names_ordered: Vec<String> = Vec::new();
+        let mut bone_offsets: HashMap<String, Matrix4<f32>> = HashMap::new();
+        for ai_mesh in &scene.meshes {
+            for bone in &ai_mesh.bones {
+                let name = bone.name.clone();
+                if !bone_offsets.contains_key(&name) {
+                    bone_names_ordered.push(name.clone());
+                    bone_offsets.insert(name, Self::ai_matrix_to_cg(&bone.offset_matrix));
+                }
+            }
+        }
+
+        if bone_names_ordered.is_empty() {
+            return None;
+        }
+
+        // Build name→index lookup
+        let name_to_idx: HashMap<&str, usize> = bone_names_ordered.iter().enumerate().map(|(i, n)| (n.as_str(), i)).collect();
+
+        // Recursive helper to find parent index for a bone
+        fn find_parent(
+            node: &russimp_ng::node::Node,
+            bone_name: &str,
+            name_to_idx: &HashMap<&str, usize>,
+        ) -> Option<usize> {
+            for child in node.children.borrow().iter() {
+                if child.name == bone_name {
+                    return name_to_idx.get(node.name.as_str()).copied();
+                }
+            }
+            for child in node.children.borrow().iter() {
+                if let Some(idx) = find_parent(child, bone_name, name_to_idx) {
+                    return Some(idx);
+                }
+            }
+            None
+        }
+
+        fn find_bind_local(
+            node: &russimp_ng::node::Node,
+            bone_name: &str,
+        ) -> Option<Matrix4<f32>> {
+            if node.name == bone_name {
+                return Some(ModelLoader::ai_matrix_to_cg(&node.transformation));
+            }
+            for child in node.children.borrow().iter() {
+                if let Some(x) = find_bind_local(child, bone_name) {
+                    return Some(x);
+                }
+            }
+            None
+        }
+
+        let mut bone_data_vec: Vec<BoneData> = Vec::with_capacity(bone_names_ordered.len());
+        for bone_name in &bone_names_ordered {
+            let offset = bone_offsets[bone_name.as_str()];
+            let bind_local_transform = if let Some(root) = &scene.root {
+                find_bind_local(root, bone_name).unwrap_or_else(|| Matrix4::identity())
+            } else {
+                Matrix4::identity()
+            };
+            let parent_index = if let Some(root) = &scene.root {
+                find_parent(root, bone_name, &name_to_idx)
+            } else {
+                None
+            };
+            bone_data_vec.push(BoneData {
+                name: bone_name.clone(),
+                bind_local_transform,
+                offset_matrix: offset,
+                parent_index,
+            });
+        }
+
+        Some(Skeleton::new(bone_data_vec))
+    }
+
+    /// Convert a russimp animation into our engine AnimationClip.
+    fn extract_animation(ai_anim: &russimp_ng::animation::Animation) -> AnimationClip {
+        let channels: Vec<BoneChannel> = ai_anim.channels.iter().map(|ch| {
+            BoneChannel {
+                bone_name: ch.name.clone(),
+                position_keys: ch.position_keys.iter().map(|k| PositionKey {
+                    time: k.time,
+                    value: Vector3::new(k.value.x, k.value.y, k.value.z),
+                }).collect(),
+                rotation_keys: ch.rotation_keys.iter().map(|k| RotationKey {
+                    time: k.time,
+                    value: Quaternion::new(k.value.w, k.value.x, k.value.y, k.value.z),
+                }).collect(),
+                scaling_keys: ch.scaling_keys.iter().map(|k| ScalingKey {
+                    time: k.time,
+                    value: Vector3::new(k.value.x, k.value.y, k.value.z),
+                }).collect(),
+            }
+        }).collect();
+
+        AnimationClip {
+            name: ai_anim.name.clone(),
+            duration_ticks: ai_anim.duration,
+            ticks_per_second: ai_anim.ticks_per_second,
+            channels,
         }
     }
 
@@ -511,18 +663,44 @@ impl ModelLoader {
             }
         }
 
+        // Extract bone data — same as process_mesh_prepared
+        let vert_count = ai_mesh.vertices.len();
+        let mut bone_indices: Vec<[i32; 4]> = vec![[-1, -1, -1, -1]; vert_count];
+        let mut bone_weights: Vec<[f32; 4]> = vec![[0.0, 0.0, 0.0, 0.0]; vert_count];
+        for (bone_idx, bone) in ai_mesh.bones.iter().enumerate() {
+            for vw in &bone.weights {
+                let vid = vw.vertex_id as usize;
+                if vid < vert_count {
+                    let slot = bone_weights[vid].iter().position(|w| *w == 0.0);
+                    if let Some(s) = slot {
+                        bone_indices[vid][s] = bone_idx as i32;
+                        bone_weights[vid][s] = vw.weight;
+                    }
+                }
+            }
+        }
+        for weights in bone_weights.iter_mut() {
+            let sum: f32 = weights.iter().sum();
+            if sum > 0.0 {
+                for w in weights.iter_mut() { *w /= sum; }
+            } else {
+                weights[0] = 1.0;
+            }
+        }
+
         log::debug!(
-            "[ModelLoader] mesh: verts={} norms={} uvs={} colors={}",
+            "[ModelLoader] mesh: verts={} norms={} uvs={} colors={} bones={}",
             ai_mesh.vertices.len(),
             ai_mesh.normals.len(),
             texcoords.len() / 2,
             colors.len() / 4,
+            ai_mesh.bones.len(),
         );
 
-        Mesh::from_raw(positions, normals, texcoords, indices, colors)
+        Mesh::from_raw(positions, normals, texcoords, indices, colors, bone_indices, bone_weights)
     }
 
-    fn process_mesh_prepared(ai_mesh: &AiMesh) -> PreparedMesh {
+    fn process_mesh_prepared(ai_mesh: &AiMesh, name_to_global_idx: &HashMap<String, usize>) -> PreparedMesh {
         let mut positions = Vec::new();
         let mut normals = Vec::new();
         let mut texcoords = Vec::new();
@@ -557,6 +735,42 @@ impl ModelLoader {
             }
         }
 
+        // ── Extract bone data ─────────────────────────────────────────────
+        let vert_count = ai_mesh.vertices.len();
+        let mut bone_indices: Vec<[i32; 4]> = vec![[-1, -1, -1, -1]; vert_count];
+        let mut bone_weights: Vec<[f32; 4]> = vec![[0.0, 0.0, 0.0, 0.0]; vert_count];
+
+        for (bone_idx, bone) in ai_mesh.bones.iter().enumerate() {
+            let global_idx = name_to_global_idx
+                .get(&bone.name)
+                .copied()
+                .unwrap_or(bone_idx) as i32;
+            for vw in &bone.weights {
+                let vid = vw.vertex_id as usize;
+                if vid < vert_count {
+                    // Find first empty slot (weight == 0.0)
+                    let slot = bone_weights[vid].iter().position(|w| *w == 0.0);
+                    if let Some(s) = slot {
+                        bone_indices[vid][s] = global_idx;
+                        bone_weights[vid][s] = vw.weight;
+                    }
+                }
+            }
+        }
+
+        // Normalize weights so they sum to 1.0
+        for weights in bone_weights.iter_mut() {
+            let sum: f32 = weights.iter().sum();
+            if sum > 0.0 {
+                for w in weights.iter_mut() {
+                    *w /= sum;
+                }
+            } else if sum == 0.0 {
+                // No bones — set identity weight on bone 0
+                weights[0] = 1.0;
+            }
+        }
+
         PreparedMesh {
             positions,
             normals,
@@ -564,6 +778,8 @@ impl ModelLoader {
             indices,
             colors,
             material_index: ai_mesh.material_index as usize,
+            bone_indices,
+            bone_weights,
         }
     }
 

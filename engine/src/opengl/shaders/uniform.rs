@@ -241,6 +241,34 @@ impl Uniform<cgmath::Vector3<f32>> for UniformVec3 {
     }
 }
 
+pub struct UniformMatrix4Array {
+    elements: Vec<UniformMatrix4>,
+}
+
+impl UniformMatrix4Array {
+    pub fn new(name: &str, max_count: usize) -> Self {
+        let elements = (0..max_count)
+            .map(|i| UniformMatrix4::new(&format!("{}[{}]", name, i)))
+            .collect();
+        Self { elements }
+    }
+}
+
+impl Uniform<Vec<Matrix4<f32>>> for UniformMatrix4Array {
+    fn initialize(&mut self, program_id: u32) {
+        for elem in &mut self.elements {
+            elem.initialize(program_id);
+        }
+    }
+
+    fn load(&self, matrices: &Vec<Matrix4<f32>>) {
+        let count = matrices.len().min(self.elements.len());
+        for i in 0..count {
+            self.elements[i].load(&matrices[i]);
+        }
+    }
+}
+
 // Define a wrapper that can work with any lifetime
 pub struct UniformAdapter<U, T, F>
 where
