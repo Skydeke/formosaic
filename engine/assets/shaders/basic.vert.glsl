@@ -17,7 +17,7 @@ out vec4 v_color;
 uniform mat4 uVP;
 uniform mat4 uModel;
 uniform int uBoneCount;
-uniform mat4 uBones[128];
+uniform mat4 uBones[64];
 
 void main() {
     vec4 skinnedPos = vec4(pos, 1.0);

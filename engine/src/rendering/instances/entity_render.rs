@@ -8,7 +8,9 @@ use crate::architecture::models::model::Model;
 use crate::architecture::scene::entity::scene_object::SceneObject;
 use crate::architecture::scene::node::node::NodeBehavior;
 use crate::architecture::scene::scene_context::SceneContext;
-use crate::opengl::shaders::uniform::{UniformAdapter, UniformBoolean, UniformFloat, UniformInt, UniformMatrix4Array, UniformTexture};
+use crate::opengl::shaders::uniform::{
+    UniformAdapter, UniformBoolean, UniformFloat, UniformInt, UniformMatrix4Array, UniformTexture,
+};
 use crate::opengl::shaders::{RenderState, ShaderProgram, UniformMatrix4, UniformVec3};
 use crate::rendering::abstracted::irenderer::IRenderer;
 
@@ -133,14 +135,20 @@ impl<T: SceneObject + 'static> EntityRenderer<T> {
         shader_program.add_per_instance_uniform(Box::new(UniformAdapter {
             uniform: UniformInt::new("uBoneCount"),
             extractor: Box::new(|state: &RenderState<T>| {
-                state.instance().map(|e| e.get_model().bone_matrices().len() as i32).unwrap_or(0)
+                state
+                    .instance()
+                    .map(|e| e.get_model().bone_matrices().len() as i32)
+                    .unwrap_or(0)
             }),
         }));
 
         shader_program.add_per_instance_uniform(Box::new(UniformAdapter {
-            uniform: UniformMatrix4Array::new("uBones", 128),
+            uniform: UniformMatrix4Array::new("uBones", 64),
             extractor: Box::new(|state: &RenderState<T>| {
-                state.instance().map(|e| e.get_model().bone_matrices().to_vec()).unwrap_or_default()
+                state
+                    .instance()
+                    .map(|e| e.get_model().bone_matrices().to_vec())
+                    .unwrap_or_default()
             }),
         }));
 
@@ -154,24 +162,30 @@ impl<T: SceneObject + 'static> EntityRenderer<T> {
 /// are batched together to minimise driver state changes.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 struct MaterialKey {
-    cull_backface:  bool,
-    alpha_blend:    bool,   // Blend vs. opaque/mask
-    alpha_mask:     bool,   // Has non-trivial alpha cutoff
+    cull_backface: bool,
+    alpha_blend: bool, // Blend vs. opaque/mask
+    alpha_mask: bool,  // Has non-trivial alpha cutoff
     diffuse_tex_id: Option<u32>,
 }
 
 fn material_key(mat: Option<&Material>) -> MaterialKey {
     match mat {
         Some(m) => MaterialKey {
-            cull_backface:  m.cull_backface,
-            alpha_blend:    matches!(m.alpha_mode, crate::architecture::models::material::AlphaMode::Blend),
-            alpha_mask:     matches!(m.alpha_mode, crate::architecture::models::material::AlphaMode::Mask(_)),
+            cull_backface: m.cull_backface,
+            alpha_blend: matches!(
+                m.alpha_mode,
+                crate::architecture::models::material::AlphaMode::Blend
+            ),
+            alpha_mask: matches!(
+                m.alpha_mode,
+                crate::architecture::models::material::AlphaMode::Mask(_)
+            ),
             diffuse_tex_id: m.diffuse_texture.as_ref().map(|t| t.get_id()),
         },
         None => MaterialKey {
-            cull_backface:  false,
-            alpha_blend:    false,
-            alpha_mask:     false,
+            cull_backface: false,
+            alpha_blend: false,
+            alpha_mask: false,
             diffuse_tex_id: None,
         },
     }
@@ -179,9 +193,9 @@ fn material_key(mat: Option<&Material>) -> MaterialKey {
 
 /// Owned draw-call descriptor — no borrows, so it can be collected and sorted freely.
 struct DrawCall {
-    node:     Rc<RefCell<dyn NodeBehavior>>,
+    node: Rc<RefCell<dyn NodeBehavior>>,
     mesh_idx: usize,
-    key:      MaterialKey,
+    key: MaterialKey,
 }
 
 impl<T: SceneObject + 'static> IRenderer for EntityRenderer<T> {
@@ -211,7 +225,9 @@ impl<T: SceneObject + 'static> IRenderer for EntityRenderer<T> {
                 }
             }
 
-            if draw_calls.is_empty() { return; }
+            if draw_calls.is_empty() {
+                return;
+            }
 
             // ── Sort by material key to batch same-state draw calls ─────
             draw_calls.sort_by(|a, b| a.key.cmp(&b.key));
