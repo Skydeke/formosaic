@@ -32,13 +32,6 @@ impl AnimationPlayer {
 
     /// Start playing a clip from the beginning.
     pub fn play(&mut self, clip: AnimationClip) {
-        log::debug!(
-            "[AnimationPlayer] play name='{}' duration_ticks={:.3} tps={:.3} channels={}",
-            clip.name,
-            clip.duration_ticks,
-            clip.ticks_per_second,
-            clip.channels.len(),
-        );
         self.clip = Some(clip);
         self.local_time_sec = 0.0;
         self.playing = true;
@@ -71,14 +64,6 @@ impl AnimationPlayer {
         };
 
         self.local_time_sec += dt as f64 * self.speed as f64;
-        if log::log_enabled!(log::Level::Debug) {
-            log::debug!(
-                "[AnimationPlayer] update dt={:.4} local_time_sec={:.4} clip='{}'",
-                dt,
-                self.local_time_sec,
-                clip.name,
-            );
-        }
 
         let duration = clip.duration_seconds();
         if duration > 0.0 {
@@ -121,40 +106,8 @@ impl AnimationPlayer {
             .iter()
             .map(|b| b.bind_local_transform)
             .collect();
-        if log::log_enabled!(log::Level::Debug) {
-            log::debug!(
-                "[AnimationPlayer] evaluate clip='{}' time_ticks={:.4} bones={} channels={}",
-                clip.name,
-                time_ticks,
-                bone_names.len(),
-                clip.channels.len(),
-            );
-            for probe in ["Hips", "Pelvis", "Spine", "LeftArm", "RightArm", "CharacterArmature"] {
-                if let Some(idx) = bone_names.iter().position(|n| n == probe) {
-                    log::debug!(
-                        "[AnimationPlayer] probe bone='{}' idx={} bind_local={:?}",
-                        probe,
-                        idx,
-                        bind_local_transforms.get(idx),
-                    );
-                }
-            }
-        }
         let local_transforms = evaluate_clip(clip, time_ticks, &bone_names, &bind_local_transforms);
         let finals = skeleton.compute_final_matrices(&local_transforms).to_vec();
-        if log::log_enabled!(log::Level::Debug) {
-            for probe in ["Hips", "Pelvis", "Spine", "LeftArm", "RightArm", "CharacterArmature"] {
-                if let Some(idx) = bone_names.iter().position(|n| n == probe) {
-                    log::debug!(
-                        "[AnimationPlayer] probe bone='{}' idx={} local={:?} final={:?}",
-                        probe,
-                        idx,
-                        local_transforms.get(idx),
-                        finals.get(idx),
-                    );
-                }
-            }
-        }
         finals
     }
 

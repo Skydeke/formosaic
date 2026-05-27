@@ -77,14 +77,6 @@ impl Skeleton {
             self.final_matrices[i] = world[i] * self.bones[i].offset_matrix;
         }
 
-        if log::log_enabled!(log::Level::Debug) {
-            log::debug!(
-                "[Skeleton] compute_final_matrices bones={} root_parent={:?}",
-                self.bones.len(),
-                self.bones.first().and_then(|b| b.parent_index),
-            );
-        }
-
         &self.final_matrices
     }
 

@@ -131,16 +131,5 @@ pub fn evaluate_clip(
         }
     }
 
-    if log::log_enabled!(log::Level::Debug) {
-        log::debug!(
-            "[Animation] evaluate_clip clip='{}' time_ticks={:.4} channels={} matched={} bones={}",
-            clip.name,
-            time_ticks,
-            clip.channels.len(),
-            matched,
-            bone_names.len(),
-        );
-    }
-
     result
 }

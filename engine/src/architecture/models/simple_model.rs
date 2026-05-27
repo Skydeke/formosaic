@@ -175,25 +175,8 @@ impl SimpleModel {
 
     pub fn update_animation(&mut self, dt: f32) {
         if let Some(ref mut skel) = self.skeleton {
-            if log::log_enabled!(log::Level::Debug) {
-                log::debug!(
-                    "[SimpleModel] update_animation dt={:.4} clip={:?} playing={} bones={} anims={}",
-                    dt,
-                    self.player.clip.as_ref().map(|c| c.name.as_str()),
-                    self.player.playing,
-                    skel.bone_count(),
-                    self.animations.len(),
-                );
-            }
             self.player.update(dt);
             self.bone_matrices = self.player.evaluate(skel);
-            if log::log_enabled!(log::Level::Debug) {
-                log::debug!(
-                    "[SimpleModel] bone_matrices computed count={} has_clip={}",
-                    self.bone_matrices.len(),
-                    self.player.has_clip(),
-                );
-            }
         }
     }
 
@@ -211,32 +194,15 @@ impl SimpleModel {
 
     pub fn pick_random_animation(&mut self) {
         if self.animations.is_empty() {
-            log::debug!("[SimpleModel] pick_random_animation skipped: no animations");
             return;
         }
         use rand::Rng;
         let idx = rand::rng().random_range(0..self.animations.len());
-        if log::log_enabled!(log::Level::Debug) {
-            let names: Vec<&str> = self.animations.iter().map(|a| a.name.as_str()).collect();
-            log::debug!(
-                "[SimpleModel] available animations: {:?}",
-                names,
-            );
-        }
-        log::debug!(
-            "[SimpleModel] pick_random_animation idx={} name='{}' duration_ticks={:.3} tps={:.3} channels={}",
-            idx,
-            self.animations[idx].name,
-            self.animations[idx].duration_ticks,
-            self.animations[idx].ticks_per_second,
-            self.animations[idx].channels.len(),
-        );
         self.player.play(self.animations[idx].clone());
     }
 
     pub fn pick_solve_animation(&mut self) {
         if self.animations.is_empty() {
-            log::debug!("[SimpleModel] pick_solve_animation skipped: no animations");
             return;
         }
 
@@ -260,14 +226,6 @@ impl SimpleModel {
 
         let Some((idx, clip)) = chosen else { return; };
 
-        log::info!(
-            "[SimpleModel] pick_solve_animation idx={} name='{}' duration_ticks={:.3} tps={:.3} channels={}",
-            idx,
-            clip.name,
-            clip.duration_ticks,
-            clip.ticks_per_second,
-            clip.channels.len(),
-        );
         self.player.play(clip);
     }
 
