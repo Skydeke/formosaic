@@ -9,5 +9,4 @@
 
 - Can we make better use of the sceneraph instead of collecting lists to render?
 
-- The dot product for deciding lerp, is should onnly apply if the direction is right,
-    - dot product allows - vector too
+- Better Event system (integrated with the statemachine)

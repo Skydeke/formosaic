@@ -52,7 +52,7 @@ fn load_3d_asset_impl(path: &str) -> Result<Vec<u8>, String> {
         )
         .map_err(|e| format!("getAssets call failed: {e:?}"))?
         .l()
-        .ok_or("getAssets returned null")?;
+        .map_err(|e| format!("getAssets JValue conversion failed: {e:?}"))?;
 
     let path_jstr = env
         .new_string(path)
@@ -66,7 +66,7 @@ fn load_3d_asset_impl(path: &str) -> Result<Vec<u8>, String> {
         )
         .map_err(|e| format!("open call failed: {e:?}"))?
         .l()
-        .ok_or("InputStream open returned null")?;
+        .map_err(|e| format!("InputStream JValue conversion failed: {e:?}"))?;
 
     let available = env
         .call_method(&input_stream, "available", "()I", &[])
