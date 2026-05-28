@@ -1,6 +1,7 @@
 use std::cell::RefCell;
 use std::rc::Rc;
 
+use cgmath::Matrix4;
 use cgmath::Vector3;
 
 use crate::architecture::models::material::Material;
@@ -11,6 +12,7 @@ use crate::architecture::scene::scene_context::SceneContext;
 use crate::opengl::shaders::uniform::{
     UniformAdapter, UniformBoolean, UniformFloat, UniformInt, UniformMatrix4Array, UniformTexture,
 };
+use crate::opengl::shaders::render_state::ModelRenderData;
 use crate::opengl::shaders::{RenderState, ShaderProgram, UniformMatrix4, UniformVec3};
 use crate::rendering::abstracted::irenderer::IRenderer;
 
@@ -40,16 +42,17 @@ impl<T: SceneObject + 'static> EntityRenderer<T> {
             }),
         }));
 
+        // uModel: read pre-resolved data from RenderState (no get_model needed).
         shader_program.add_per_instance_uniform(Box::new(UniformAdapter {
             uniform: UniformMatrix4::new("uModel"),
             extractor: Box::new(|state: &RenderState<T>| {
                 let entity = state.instance().unwrap();
                 let entity_matrix = entity.transform().get_matrix();
-                let mesh_matrix = entity
-                    .get_model()
-                    .mesh_transform(state.instance_mesh_idx() as usize)
-                    .unwrap_or_else(|| cgmath::Matrix4::from_scale(1.0));
-                entity_matrix * mesh_matrix
+                if state.is_skinned() {
+                    entity_matrix
+                } else {
+                    entity_matrix * state.mesh_transform()
+                }
             }),
         }));
 
@@ -132,24 +135,16 @@ impl<T: SceneObject + 'static> EntityRenderer<T> {
             }),
         }));
 
+        // uBoneCount: read from pre-resolved RenderState data.
         shader_program.add_per_instance_uniform(Box::new(UniformAdapter {
             uniform: UniformInt::new("uBoneCount"),
-            extractor: Box::new(|state: &RenderState<T>| {
-                state
-                    .instance()
-                    .map(|e| e.get_model().bone_matrices().len() as i32)
-                    .unwrap_or(0)
-            }),
+            extractor: Box::new(|state: &RenderState<T>| state.bone_count()),
         }));
 
+        // uBones: read from pre-resolved RenderState data.
         shader_program.add_per_instance_uniform(Box::new(UniformAdapter {
             uniform: UniformMatrix4Array::new("uBones", 64),
-            extractor: Box::new(|state: &RenderState<T>| {
-                state
-                    .instance()
-                    .map(|e| e.get_model().bone_matrices().to_vec())
-                    .unwrap_or_default()
-            }),
+            extractor: Box::new(|state: &RenderState<T>| state.bone_matrices().to_vec()),
         }));
 
         log::info!("EntityRenderer initialized successfully");
@@ -161,14 +156,14 @@ impl<T: SceneObject + 'static> EntityRenderer<T> {
 /// (culling, blending, texture binding).  Draw calls with the same key
 /// are batched together to minimise driver state changes.
 #[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
-struct MaterialKey {
-    cull_backface: bool,
-    alpha_blend: bool, // Blend vs. opaque/mask
-    alpha_mask: bool,  // Has non-trivial alpha cutoff
-    diffuse_tex_id: Option<u32>,
+pub struct MaterialKey {
+    pub cull_backface: bool,
+    pub alpha_blend: bool,
+    pub alpha_mask: bool,
+    pub diffuse_tex_id: Option<u32>,
 }
 
-fn material_key(mat: Option<&Material>) -> MaterialKey {
+pub fn material_key(mat: Option<&Material>) -> MaterialKey {
     match mat {
         Some(m) => MaterialKey {
             cull_backface: m.cull_backface,
@@ -196,6 +191,9 @@ struct DrawCall {
     node: Rc<RefCell<dyn NodeBehavior>>,
     mesh_idx: usize,
     key: MaterialKey,
+    /// Pre-resolved from the model's RefCell<..> at draw-call build time,
+    /// so uniform extractors never need to touch the model RefCell during rendering.
+    model_data: ModelRenderData,
 }
 
 impl<T: SceneObject + 'static> IRenderer for EntityRenderer<T> {
@@ -216,10 +214,30 @@ impl<T: SceneObject + 'static> IRenderer for EntityRenderer<T> {
 
                     for i in 0..mesh_count {
                         let mat = model_ref.get_material(i);
+                        let meshes = model_ref.get_meshes();
+                        let is_skinned = meshes
+                            .get(i)
+                            .map(|m| m.is_skinned())
+                            .unwrap_or(false);
+                        let mesh_transform = model_ref
+                            .mesh_transform(i)
+                            .unwrap_or_else(|| Matrix4::from_scale(1.0));
+                        let bone_matrices = if is_skinned {
+                            model_ref.bone_matrices().to_vec()
+                        } else {
+                            Vec::new()
+                        };
+                        let bone_count = bone_matrices.len() as i32;
                         draw_calls.push(DrawCall {
                             node: Rc::clone(node),
                             mesh_idx: i,
                             key: material_key(mat),
+                            model_data: ModelRenderData {
+                                mesh_transform,
+                                is_skinned,
+                                bone_matrices,
+                                bone_count,
+                            },
                         });
                     }
                 }
@@ -258,6 +276,7 @@ impl<T: SceneObject + 'static> IRenderer for EntityRenderer<T> {
                     dc.mesh_idx,
                     material,
                     has_vc,
+                    &dc.model_data,
                 );
                 self.shader_program
                     .update_per_instance_uniforms(&render_state);
@@ -277,85 +296,5 @@ impl<T: SceneObject + 'static> IRenderer for EntityRenderer<T> {
 impl<T: SceneObject> Drop for EntityRenderer<T> {
     fn drop(&mut self) {
         log::info!("EntityRenderer dropped");
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::architecture::models::material::AlphaMode;
-
-    fn make_mat(cull_backface: bool, alpha_mode: AlphaMode) -> Material {
-        Material {
-            cull_backface,
-            alpha_mode,
-            ..Material::default()
-        }
-    }
-
-    #[test]
-    fn material_key_handles_culling() {
-        let with_cull = make_mat(true, AlphaMode::Opaque);
-        let no_cull = make_mat(false, AlphaMode::Opaque);
-        assert_ne!(material_key(Some(&with_cull)), material_key(Some(&no_cull)));
-        assert!(material_key(Some(&with_cull)).cull_backface);
-        assert!(!material_key(Some(&no_cull)).cull_backface);
-    }
-
-    #[test]
-    fn material_key_handles_alpha_blend() {
-        let opaque = make_mat(true, AlphaMode::Opaque);
-        let blend = make_mat(true, AlphaMode::Blend);
-        assert_ne!(material_key(Some(&opaque)), material_key(Some(&blend)));
-        let key = material_key(Some(&blend));
-        assert!(key.alpha_blend);
-        assert!(!key.alpha_mask);
-    }
-
-    #[test]
-    fn material_key_handles_alpha_mask() {
-        let opaque = make_mat(true, AlphaMode::Opaque);
-        let mask = make_mat(true, AlphaMode::Mask(0.5));
-        assert_ne!(material_key(Some(&opaque)), material_key(Some(&mask)));
-        let key = material_key(Some(&mask));
-        assert!(!key.alpha_blend);
-        assert!(key.alpha_mask);
-    }
-
-    #[test]
-    fn material_key_none() {
-        assert_eq!(
-            material_key(None),
-            MaterialKey {
-                cull_backface: false,
-                alpha_blend: false,
-                alpha_mask: false,
-                diffuse_tex_id: None,
-            }
-        );
-    }
-
-    #[test]
-    fn material_key_groups_identical() {
-        let a = make_mat(true, AlphaMode::Opaque);
-        let b = make_mat(true, AlphaMode::Opaque);
-        assert_eq!(material_key(Some(&a)), material_key(Some(&b)));
-    }
-
-    #[test]
-    fn material_sort_groups_same_keys_together() {
-        let mat_a = make_mat(false, AlphaMode::Blend);
-        let mat_b = make_mat(true, AlphaMode::Opaque);
-        let key_a = material_key(Some(&mat_a));
-        let key_b = material_key(Some(&mat_b));
-
-        // Interleaved keys — after sorting all key_a items come first, then all key_b
-        let mut keys = vec![key_b.clone(), key_a.clone(), key_b.clone(), key_a.clone()];
-        keys.sort_by(|a, b| a.cmp(b));
-
-        assert_eq!(keys[0], key_a);
-        assert_eq!(keys[1], key_a);
-        assert_eq!(keys[2], key_b);
-        assert_eq!(keys[3], key_b);
     }
 }

@@ -1,6 +1,7 @@
+use cgmath::Matrix4;
 use formosaic_engine::architecture::models::mesh::Mesh;
 use formosaic_engine::architecture::models::model::Model;
-use formosaic_engine::opengl::shaders::render_state::RenderState;
+use formosaic_engine::opengl::shaders::render_state::{ModelRenderData, RenderState};
 use formosaic_engine::rendering::abstracted::irenderer::IRenderer;
 use formosaic_engine::rendering::abstracted::processable::Processable;
 use formosaic_engine::rendering::instances::camera::camera::Camera;
@@ -9,7 +10,11 @@ use std::cell::Cell;
 struct DummyRenderer;
 
 impl IRenderer for DummyRenderer {
-    fn render(&mut self, _context: &formosaic_engine::architecture::scene::scene_context::SceneContext) {}
+    fn render(
+        &mut self,
+        _context: &formosaic_engine::architecture::scene::scene_context::SceneContext,
+    ) {
+    }
     fn finish(&mut self) {}
 }
 
@@ -28,9 +33,15 @@ impl Model for DummyModel {
     fn bind_and_configure(&self, _mesh_idx: usize) {}
     fn unbind(&self, _mesh_idx: usize) {}
     fn delete(&mut self) {}
-    fn get_lowest(&self) -> f32 { 0.0 }
-    fn get_meshes(&self) -> &[Mesh] { &self.meshes }
-    fn centroid(&self) -> Option<cgmath::Vector3<f32>> { None }
+    fn get_lowest(&self) -> f32 {
+        0.0
+    }
+    fn get_meshes(&self) -> &[Mesh] {
+        &self.meshes
+    }
+    fn centroid(&self) -> Option<cgmath::Vector3<f32>> {
+        None
+    }
 }
 
 struct DummyInstance {
@@ -40,17 +51,16 @@ struct DummyInstance {
 
 impl DummyInstance {
     fn new() -> Self {
-        Self { model: DummyModel::new(), processed: Cell::new(0) }
+        Self {
+            model: DummyModel::new(),
+            processed: Cell::new(0),
+        }
     }
 }
 
 impl Processable for DummyInstance {
     fn process(&mut self) {
         self.processed.set(self.processed.get() + 1);
-    }
-
-    fn get_model(&self) -> &impl Model {
-        &self.model
     }
 }
 
@@ -60,6 +70,12 @@ fn render_state_flags_are_consistent() {
     let camera = Camera::new();
     let instance = DummyInstance::new();
 
+    let dummy_model_data = ModelRenderData {
+        mesh_transform: Matrix4::from_scale(1.0),
+        is_skinned: false,
+        bone_matrices: Vec::new(),
+        bone_count: 0,
+    };
     let state = RenderState::new_preresolved(
         &renderer,
         &instance,
@@ -67,6 +83,7 @@ fn render_state_flags_are_consistent() {
         0,
         None,
         false,
+        &dummy_model_data,
     );
 
     assert!(state.has_instance());

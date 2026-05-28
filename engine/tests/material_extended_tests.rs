@@ -103,7 +103,9 @@ fn material_default_alpha_is_opaque() {
 #[test]
 fn material_builder_does_not_mutate_original() {
     let mat1 = Material::new();
-    let mat2 = mat1.clone().with_diffuse_color(Vector4::new(0.0, 1.0, 0.0, 1.0));
+    let mat2 = mat1
+        .clone()
+        .with_diffuse_color(Vector4::new(0.0, 1.0, 0.0, 1.0));
     assert_eq!(mat1.diffuse_color, Vector4::new(1.0, 1.0, 1.0, 1.0));
     assert_eq!(mat2.diffuse_color, Vector4::new(0.0, 1.0, 0.0, 1.0));
 }

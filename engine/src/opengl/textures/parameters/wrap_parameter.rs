@@ -26,4 +26,3 @@ impl TextureParameter for WrapParameter {
         self.get()
     }
 }
-

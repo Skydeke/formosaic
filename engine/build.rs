@@ -45,14 +45,9 @@ fn main() {
         // This keeps the desktop build completely unaffected.
         let ndk_root = env::var("ANDROID_NDK_ROOT")
             .or_else(|_| env::var("ANDROID_NDK_HOME"))
-            .expect(
-                "Android NDK not found. Set ANDROID_NDK_ROOT or run `make setup-android`.",
-            );
+            .expect("Android NDK not found. Set ANDROID_NDK_ROOT or run `make setup-android`.");
 
-        let sysroot = format!(
-            "{}/toolchains/llvm/prebuilt/linux-x86_64/sysroot",
-            ndk_root
-        );
+        let sysroot = format!("{}/toolchains/llvm/prebuilt/linux-x86_64/sysroot", ndk_root);
 
         // Determine the ABI-specific include dir from TARGET.
         let abi_include = if target.starts_with("aarch64") {

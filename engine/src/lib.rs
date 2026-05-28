@@ -10,8 +10,8 @@
 //! - `architecture`  — Scene graph, models, entities, transforms
 //! - `rendering`     — Pipeline, deferred renderer, camera, IRenderer abstraction
 
-pub mod architecture;
-pub mod opengl;
-pub mod input;
-pub mod rendering;
 pub mod app;
+pub mod architecture;
+pub mod input;
+pub mod opengl;
+pub mod rendering;

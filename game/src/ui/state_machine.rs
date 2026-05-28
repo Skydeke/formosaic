@@ -35,7 +35,9 @@ pub struct UiStateMachine {
 
 impl UiStateMachine {
     pub fn new() -> Self {
-        Self { screen: UiScreen::MainMenu }
+        Self {
+            screen: UiScreen::MainMenu,
+        }
     }
 
     pub fn screen(&self) -> UiScreen {

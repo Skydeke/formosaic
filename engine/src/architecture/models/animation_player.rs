@@ -1,4 +1,4 @@
-use cgmath::{Matrix4, SquareMatrix};
+use cgmath::Matrix4;
 
 use crate::architecture::models::animation::{evaluate_clip, AnimationClip};
 use crate::architecture::models::skeleton::Skeleton;
@@ -94,9 +94,14 @@ impl AnimationPlayer {
                 (c, ticks)
             }
             None => {
-                // No clip — return identity matrices for all bones
-                let count = skeleton.bone_count();
-                return vec![Matrix4::identity(); count];
+                // No clip — return bind-pose matrices (not identity) so that rendering
+                // is correct even before any animation is played.
+                let bind_poses: Vec<Matrix4<f32>> = skeleton
+                    .bones
+                    .iter()
+                    .map(|b| b.bind_local_transform)
+                    .collect();
+                return skeleton.compute_final_matrices(&bind_poses).to_vec();
             }
         };
 
@@ -113,7 +118,9 @@ impl AnimationPlayer {
 
     pub fn is_finished(&self) -> bool {
         match &self.clip {
-            Some(c) => self.loop_mode == LoopMode::Once && self.local_time_sec >= c.duration_seconds(),
+            Some(c) => {
+                self.loop_mode == LoopMode::Once && self.local_time_sec >= c.duration_seconds()
+            }
             None => true,
         }
     }

@@ -1,3 +1,27 @@
+//! Vertex Buffer Object wrapper.
+//!
+//! # Safety invariants
+//!
+//! Every `unsafe { gl::* }` call in this module is sound because:
+//!
+//! - `id` is always a valid GL buffer name obtained from `gl::GenBuffers`, or
+//!   zero (null buffer).  Wrappers like `new_raw` with a hard-coded zero are
+//!   only used for the `NULL_ARRAY` / `NULL_INDEX` sentinels and are never
+//!   bound or uploaded to.
+//! - `target` / `usage` are valid `gl::*` enums stored by the constructor.
+//! - `bind()` and `unbind()` cache the currently-bound VBO per thread using
+//!   a `thread_local!` `Cell`, eliding redundant GL calls.
+//! - `size` tracks the allocated byte count; `store_data_generic` re-allocates
+//!   when the existing buffer is too small (a heuristic that avoids frequent
+//!   re-allocations for dynamic data).
+//! - `delete()` is idempotent (guarded by `deleted` flag) and releases the
+//!   GL resource exactly once.
+//! - The destructor does **not** call `gl::DeleteBuffers` — the caller must
+//!   explicitly call `delete()` while the GL context is current.  This is a
+//!   deliberate design choice to support GL context loss without double-free.
+//! - Raw pointers from `gl::MapBuffer` / `data.as_ptr()` are used only within
+//!   the same `unsafe` block and are not exposed outside the wrapper.
+
 use gl::types::*;
 use std::cell::Cell;
 use std::ptr;

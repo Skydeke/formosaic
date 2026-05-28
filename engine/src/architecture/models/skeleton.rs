@@ -17,6 +17,11 @@ pub struct BoneData {
 #[derive(Clone, Debug)]
 pub struct Skeleton {
     pub bones: Vec<BoneData>,
+    /// Accumulated world transform from scene root to the skeleton's own root
+    /// ancestor (e.g. the Armature node).  Assimp offset matrices are relative
+    /// to the scene root; without this the bone hierarchy misses the armature
+    /// node's scale/rotation, causing skinned meshes to be the wrong size.
+    pub root_ancestor_transform: Matrix4<f32>,
     /// Pre-allocated workspace for final matrices (avoids re-allocation each frame).
     final_matrices: Vec<Matrix4<f32>>,
 }
@@ -26,6 +31,7 @@ impl Skeleton {
         let count = bones.len();
         Self {
             bones,
+            root_ancestor_transform: Matrix4::identity(),
             final_matrices: vec![Matrix4::identity(); count],
         }
     }
@@ -62,13 +68,16 @@ impl Skeleton {
         let mut order: Vec<usize> = (0..self.bones.len()).collect();
         order.sort_by_key(|&i| depth[i]);
 
-        // Accumulate world transforms through the hierarchy in depth order
+        // Accumulate world transforms through the hierarchy in depth order.
+        // Root bones additionally get the skeleton-root ancestor transform so
+        // that the bone world is relative to the scene root (matching what
+        // Assimp's offset matrix expects).
         let mut world = vec![Matrix4::identity(); self.bones.len()];
         for &i in &order {
             let local = local_transforms[i];
             world[i] = match self.bones[i].parent_index {
                 Some(parent) => world[parent] * local,
-                None => local,
+                None => self.root_ancestor_transform * local,
             };
         }
 
@@ -81,7 +90,13 @@ impl Skeleton {
     }
 
     /// Build full bone-local transforms from decomposed parts (position, rotation, scale).
-    pub fn make_local_transform(pos: Vector3<f32>, rot: Quaternion<f32>, scale: Vector3<f32>) -> Matrix4<f32> {
-        Matrix4::from_translation(pos) * Matrix4::from(rot) * Matrix4::from_nonuniform_scale(scale.x, scale.y, scale.z)
+    pub fn make_local_transform(
+        pos: Vector3<f32>,
+        rot: Quaternion<f32>,
+        scale: Vector3<f32>,
+    ) -> Matrix4<f32> {
+        Matrix4::from_translation(pos)
+            * Matrix4::from(rot)
+            * Matrix4::from_nonuniform_scale(scale.x, scale.y, scale.z)
     }
 }

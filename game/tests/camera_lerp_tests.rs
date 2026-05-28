@@ -39,7 +39,13 @@ fn scramble_t_monotonically_decreasing() {
     let mut prev_t = 1.0;
     for a in angles {
         let t = camera_scramble_t(dot_from_angle_deg(a));
-        assert!(t <= prev_t + 1e-6, "t increased from {} to {} at {}°", prev_t, t, a);
+        assert!(
+            t <= prev_t + 1e-6,
+            "t increased from {} to {} at {}°",
+            prev_t,
+            t,
+            a
+        );
         prev_t = t;
     }
 }
@@ -49,7 +55,11 @@ fn scramble_t_then_snap_threshold_ordering() {
     // SNAP_THRESHOLD_DOT ≈ cos(5°) ≈ 0.996 — solve triggers inside 5°.
     let dot_5deg = dot_from_angle_deg(5.0);
     let t_at_snap = camera_scramble_t(dot_5deg);
-    assert!(t_at_snap >= 0.0 && t_at_snap <= 0.2, "t={} at ~5° — should be nearly solved", t_at_snap);
+    assert!(
+        t_at_snap >= 0.0 && t_at_snap <= 0.2,
+        "t={} at ~5° — should be nearly solved",
+        t_at_snap
+    );
 
     // CAMERA_FADE_DOT ≈ cos(15°) ≈ 0.966 — fade starts ~3x farther than snap.
     // Verify fade-dot < snap-dot without referencing private constants.

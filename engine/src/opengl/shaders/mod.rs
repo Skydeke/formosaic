@@ -8,4 +8,7 @@ pub mod uniform;
 pub use render_state::RenderState;
 pub use shader::Shader;
 pub use shader_program::ShaderProgram;
-pub use uniform::{Uniform, UniformFloat, UniformInt, UniformMatrix4, UniformMatrix4Array, UniformVec2, UniformVec3};
+pub use uniform::{
+    Uniform, UniformFloat, UniformInt, UniformMatrix4, UniformMatrix4Array, UniformVec2,
+    UniformVec3,
+};

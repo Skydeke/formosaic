@@ -16,6 +16,11 @@ pub trait Model {
     fn get_meshes(&self) -> &[Mesh];
     fn centroid(&self) -> Option<Vector3<f32>>;
 
+    /// Current visual center in model space, if known.
+    fn visual_center(&self) -> Option<Vector3<f32>> {
+        self.centroid()
+    }
+
     /// Per-mesh local transform, if the model preserves node transforms.
     fn mesh_transform(&self, _mesh_idx: usize) -> Option<Matrix4<f32>> {
         None

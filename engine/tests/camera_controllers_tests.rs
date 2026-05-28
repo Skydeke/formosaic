@@ -1,9 +1,9 @@
 use cgmath::Vector3;
 use formosaic_engine::architecture::scene::node::transform::Transform;
 use formosaic_engine::input::{Event, Key};
-use formosaic_engine::rendering::instances::camera::camera_controller::NoneController;
-use formosaic_engine::rendering::instances::camera::camera_controllers::CameraControllers;
 use formosaic_engine::rendering::instances::camera::camera_controller::CameraController;
+use formosaic_engine::rendering::instances::camera::camera_controller::CameraControllers;
+use formosaic_engine::rendering::instances::camera::camera_controller::NoneController;
 
 struct RecordingController {
     control_calls: std::cell::Cell<u32>,
@@ -61,10 +61,7 @@ fn camera_controllers_calls_all_children() {
     let rec1 = RecordingController::new();
     let rec2 = RecordingController::new();
 
-    let mut controllers = CameraControllers::new(vec![
-        Box::new(rec1),
-        Box::new(rec2),
-    ]);
+    let mut controllers = CameraControllers::new(vec![Box::new(rec1), Box::new(rec2)]);
 
     let mut t = Transform::new();
     controllers.control(&mut t);
@@ -75,10 +72,7 @@ fn camera_controllers_forwards_events() {
     let rec1 = RecordingController::new();
     let rec2 = RecordingController::new();
 
-    let mut controllers = CameraControllers::new(vec![
-        Box::new(rec1),
-        Box::new(rec2),
-    ]);
+    let mut controllers = CameraControllers::new(vec![Box::new(rec1), Box::new(rec2)]);
 
     let ev = Event::KeyDown { key: Key::H };
     controllers.handle_event(&ev, 800.0, 600.0);
@@ -111,15 +105,20 @@ fn camera_controllers_order_is_preserved() {
         fn handle_event(&mut self, _event: &Event, _width: f32, _height: f32) {}
     }
 
-    let r1 = OrderRecorder { id: 1, order: Rc::clone(&call_order) };
-    let r2 = OrderRecorder { id: 2, order: Rc::clone(&call_order) };
-    let r3 = OrderRecorder { id: 3, order: Rc::clone(&call_order) };
+    let r1 = OrderRecorder {
+        id: 1,
+        order: Rc::clone(&call_order),
+    };
+    let r2 = OrderRecorder {
+        id: 2,
+        order: Rc::clone(&call_order),
+    };
+    let r3 = OrderRecorder {
+        id: 3,
+        order: Rc::clone(&call_order),
+    };
 
-    let mut controllers = CameraControllers::new(vec![
-        Box::new(r1),
-        Box::new(r2),
-        Box::new(r3),
-    ]);
+    let mut controllers = CameraControllers::new(vec![Box::new(r1), Box::new(r2), Box::new(r3)]);
 
     let mut t = Transform::new();
     controllers.control(&mut t);
@@ -146,7 +145,9 @@ fn camera_controllers_multiple_events_accumulate() {
         }
     }
 
-    let counter = Counter { count: Rc::clone(&count) };
+    let counter = Counter {
+        count: Rc::clone(&count),
+    };
     let mut controllers = CameraControllers::new(vec![Box::new(counter)]);
 
     for _ in 0..5 {
@@ -161,10 +162,7 @@ fn camera_controllers_mixed_controller_types() {
     let none = NoneController::new();
     let rec = RecordingController::new();
 
-    let mut controllers = CameraControllers::new(vec![
-        Box::new(none),
-        Box::new(rec),
-    ]);
+    let mut controllers = CameraControllers::new(vec![Box::new(none), Box::new(rec)]);
 
     let mut t = Transform::new();
     controllers.control(&mut t);

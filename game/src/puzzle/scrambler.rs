@@ -7,14 +7,18 @@
 //! All parameters (displacement range, orbit distance) are computed from the
 //! model's bounding geometry so the puzzle scales correctly to any model size.
 
-use cgmath::{InnerSpace, Vector3};
+use cgmath::{InnerSpace, Matrix4, Vector3};
 use rand::Rng;
 use std::cell::RefCell;
 use std::f32::consts::PI;
 use std::rc::Rc;
 
-use formosaic_engine::architecture::models::simple_model::{PuzzleParams, SimpleModel};
+use formosaic_engine::architecture::models::model::Model;
+use formosaic_engine::architecture::models::simple_model::SimpleModel;
 use formosaic_engine::rendering::instances::camera::orbit_controller::OrbitController;
+
+use super::puzzle_params::PuzzleParams;
+use super::scramble_math::compute_scramble_offsets;
 
 pub struct ScrambleState {
     /// The camera must look along this direction (or its opposite) to solve.
@@ -31,34 +35,64 @@ pub fn scramble(
     fov_radians: f32,
 ) -> ScrambleState {
     // Compute geometry-aware parameters from the model itself.
-    let params = model.borrow().compute_puzzle_params(target_world_radius, fov_radians);
+    let params = PuzzleParams::from_model(&model.borrow(), target_world_radius, fov_radians);
 
     log::info!(
         "[Scrambler] model_space_radius={:.1}  entity_scale={:.5}  \
          orbit_dist={:.2}  disp=[{:.1}, {:.1}]",
-        params.model_space_radius, params.entity_scale,
-        params.orbit_distance, params.min_disp, params.max_disp
+        params.model_space_radius,
+        params.entity_scale,
+        params.orbit_distance,
+        params.min_disp,
+        params.max_disp
     );
 
     // Clamp elevation to ±55° so the solution is never nearly vertical.
     const MAX_ELEV: f32 = 55.0 * PI / 180.0;
     let mut rng = rand::rng();
     let theta: f32 = rng.random_range(0.0..2.0 * PI);
-    let phi: f32   = rng.random_range(-MAX_ELEV..MAX_ELEV);
-    let solution_dir = Vector3::new(
-        phi.cos() * theta.cos(),
-        phi.sin(),
-        phi.cos() * theta.sin(),
-    ).normalize();
+    let phi: f32 = rng.random_range(-MAX_ELEV..MAX_ELEV);
+    let solution_dir =
+        Vector3::new(phi.cos() * theta.cos(), phi.sin(), phi.cos() * theta.sin()).normalize();
 
     log::info!(
         "[Scrambler] solution direction: ({:.3}, {:.3}, {:.3})",
-        solution_dir.x, solution_dir.y, solution_dir.z
+        solution_dir.x,
+        solution_dir.y,
+        solution_dir.z
     );
 
-    model.borrow_mut().scramble_along_axis(solution_dir, params.min_disp, params.max_disp);
+    let offsets = compute_model_offsets(
+        &model.borrow(),
+        solution_dir,
+        params.min_disp,
+        params.max_disp,
+    );
+    model.borrow_mut().set_displacement_offsets(offsets);
 
-    ScrambleState { solution_dir, params }
+    ScrambleState {
+        solution_dir,
+        params,
+    }
+}
+
+/// Compute per-mesh scramble offsets for a model without touching GPU state.
+pub fn compute_model_offsets(
+    model: &SimpleModel,
+    axis: Vector3<f32>,
+    min_disp: f32,
+    max_disp: f32,
+) -> Vec<Vec<f32>> {
+    let mut per_mesh = Vec::new();
+    for (mesh_idx, mesh) in model.get_meshes().iter().enumerate() {
+        let transform = model
+            .mesh_transform(mesh_idx)
+            .unwrap_or_else(|| Matrix4::from_scale(1.0));
+        let offsets =
+            compute_scramble_offsets(mesh.positions().len(), axis, min_disp, max_disp, transform);
+        per_mesh.push(offsets);
+    }
+    per_mesh
 }
 
 /// Build an OrbitController starting ≥60° from the solution axis.
@@ -75,12 +109,9 @@ pub fn make_scrambled_orbit(
     const CAM_MAX_ELEV: f32 = 70.0 * PI / 180.0;
     let start_dir = loop {
         let theta: f32 = rng.random_range(0.0..2.0 * PI);
-        let phi: f32   = rng.random_range(-CAM_MAX_ELEV..CAM_MAX_ELEV);
-        let candidate  = Vector3::new(
-            phi.cos() * theta.cos(),
-            phi.sin(),
-            phi.cos() * theta.sin(),
-        ).normalize();
+        let phi: f32 = rng.random_range(-CAM_MAX_ELEV..CAM_MAX_ELEV);
+        let candidate =
+            Vector3::new(phi.cos() * theta.cos(), phi.sin(), phi.cos() * theta.sin()).normalize();
 
         // Must be ≥60° from solution (neither pole of the solution axis).
         if candidate.dot(solution_dir).abs() < (PI / 3.0_f32).cos() {
@@ -89,7 +120,7 @@ pub fn make_scrambled_orbit(
     };
 
     let camera_pos = target + start_dir * distance;
-    let mut ctrl   = OrbitController::new(target, distance);
+    let mut ctrl = OrbitController::new(target, distance);
     ctrl.set_initial_position(camera_pos);
     (ctrl, camera_pos)
 }

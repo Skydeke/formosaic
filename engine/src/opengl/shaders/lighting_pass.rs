@@ -9,7 +9,7 @@ use cgmath::{vec2, Vector3};
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    architecture::{models::simple_model::SimpleModel, scene::scene_context::SceneContext},
+    architecture::scene::scene_context::SceneContext,
     opengl::{
         fbos::fbo::Fbo,
         shaders::{
@@ -25,13 +25,9 @@ use crate::{
 };
 
 // CameraOnly satisfies the Processable bound for RenderState but is never
-// used as an actual scene object — get_model() must never be called on it.
+// used as an actual scene object — with_model is never called on it.
 pub struct CameraOnly;
-#[allow(refining_impl_trait)]
 impl Processable for CameraOnly {
-    fn get_model(&self) -> &SimpleModel {
-        panic!("CameraOnly does not have a model")
-    }
     fn process(&mut self) {}
 }
 
@@ -100,7 +96,9 @@ impl LightingPass {
         {
             program.add_uniform(Box::new(UniformAdapter {
                 uniform: UniformVec3::new("uCameraPos"),
-                extractor: Box::new(|state: &RenderState<CameraOnly>| state.camera().transform.position),
+                extractor: Box::new(|state: &RenderState<CameraOnly>| {
+                    state.camera().transform.position
+                }),
             }));
         }
 

@@ -11,7 +11,6 @@
 ///   • `Skeleton::make_local_transform` — composition order
 ///   • `Skeleton::compute_final_matrices` — flat list, parent-child chain,
 ///     depth-order invariant
-
 use cgmath::{InnerSpace, Matrix4, Quaternion, SquareMatrix, Vector3, Vector4, Zero};
 use formosaic_engine::architecture::models::animation::{
     evaluate_channel, evaluate_clip, lerp_position, lerp_scaling, slerp_rotation, AnimationClip,
@@ -23,18 +22,27 @@ use formosaic_engine::architecture::models::skeleton::{BoneData, Skeleton};
 // ── helpers ─────────────────────────────────────────────────────────────────
 
 fn pos_key(t: f64, x: f32, y: f32, z: f32) -> PositionKey {
-    PositionKey { time: t, value: Vector3::new(x, y, z) }
+    PositionKey {
+        time: t,
+        value: Vector3::new(x, y, z),
+    }
 }
 
 fn rot_key(t: f64, w: f32, x: f32, y: f32, z: f32) -> RotationKey {
     let q = Quaternion::new(w, x, y, z);
     // Normalise so tests don't depend on caller precision.
     let len = (q.v.magnitude2() + q.s * q.s).sqrt();
-    RotationKey { time: t, value: Quaternion::new(q.s / len, q.v.x / len, q.v.y / len, q.v.z / len) }
+    RotationKey {
+        time: t,
+        value: Quaternion::new(q.s / len, q.v.x / len, q.v.y / len, q.v.z / len),
+    }
 }
 
 fn scl_key(t: f64, x: f32, y: f32, z: f32) -> ScalingKey {
-    ScalingKey { time: t, value: Vector3::new(x, y, z) }
+    ScalingKey {
+        time: t,
+        value: Vector3::new(x, y, z),
+    }
 }
 
 fn identity_rot() -> Quaternion<f32> {
@@ -148,7 +156,10 @@ fn slerp_rotation_t0_returns_a() {
     let a = rot_key(0.0, 1.0, 0.0, 0.0, 0.0); // identity
     let b = rot_key(1.0, 0.0, 1.0, 0.0, 0.0); // 180° around X
     let r = slerp_rotation(&a, &b, 0.0);
-    assert!((r.s - 1.0).abs() < 1e-4, "expected identity quaternion at t=0");
+    assert!(
+        (r.s - 1.0).abs() < 1e-4,
+        "expected identity quaternion at t=0"
+    );
 }
 
 #[test]
@@ -157,7 +168,11 @@ fn slerp_rotation_t1_approaches_b() {
     let b = rot_key(1.0, 0.0, 1.0, 0.0, 0.0);
     let r = slerp_rotation(&a, &b, 1.0);
     // nlerp at t=1 should be very close to b
-    assert!(r.v.magnitude() > 0.9, "expected unit-X quaternion at t=1, got {:?}", r);
+    assert!(
+        r.v.magnitude() > 0.9,
+        "expected unit-X quaternion at t=1, got {:?}",
+        r
+    );
 }
 
 #[test]
@@ -273,7 +288,11 @@ fn evaluate_clip_matching_channel_overrides_bind_pose() {
     assert_eq!(result.len(), 1);
     // Translation component: column 3, rows 0-2 in cgmath column-major
     let tx = result[0][3][0]; // col 3, row 0
-    assert!((tx - 10.0).abs() < 1e-4, "expected translation x=10 but got {}", tx);
+    assert!(
+        (tx - 10.0).abs() < 1e-4,
+        "expected translation x=10 but got {}",
+        tx
+    );
 }
 
 #[test]
@@ -324,7 +343,10 @@ fn player_play_sets_clip_and_playing() {
     p.play(make_clip());
     assert!(p.playing);
     assert!(p.has_clip());
-    assert!((p.local_time_sec - 0.0).abs() < 1e-9, "play() must reset time");
+    assert!(
+        (p.local_time_sec - 0.0).abs() < 1e-9,
+        "play() must reset time"
+    );
 }
 
 #[test]
@@ -345,7 +367,10 @@ fn player_pause_does_not_reset_time() {
     let t = p.local_time_sec;
     p.pause();
     assert!(!p.playing);
-    assert!((p.local_time_sec - t).abs() < 1e-9, "pause must preserve time");
+    assert!(
+        (p.local_time_sec - t).abs() < 1e-9,
+        "pause must preserve time"
+    );
 }
 
 #[test]
@@ -445,7 +470,10 @@ fn make_local_transform_identity_inputs() {
         Quaternion::new(1.0, 0.0, 0.0, 0.0),
         Vector3::new(1.0, 1.0, 1.0),
     );
-    assert!(approx_mat4_identity(m), "identity TRS should produce identity matrix");
+    assert!(
+        approx_mat4_identity(m),
+        "identity TRS should produce identity matrix"
+    );
 }
 
 #[test]
@@ -510,11 +538,19 @@ fn compute_final_matrices_parent_child_chain() {
 
     // Parent final: parent_world * identity_offset = parent_local
     let pp = finals[0] * Vector4::new(0.0, 0.0, 0.0, 1.0);
-    assert!((pp.x - 5.0).abs() < 1e-4, "parent world x should be 5, got {}", pp.x);
+    assert!(
+        (pp.x - 5.0).abs() < 1e-4,
+        "parent world x should be 5, got {}",
+        pp.x
+    );
 
     // Child final: child_world * identity_offset = parent_local * child_local
     let cp = finals[1] * Vector4::new(0.0, 0.0, 0.0, 1.0);
-    assert!((cp.x - 8.0).abs() < 1e-4, "child world x should be 8, got {}", cp.x);
+    assert!(
+        (cp.x - 8.0).abs() < 1e-4,
+        "child world x should be 8, got {}",
+        cp.x
+    );
 }
 
 #[test]
@@ -526,8 +562,8 @@ fn compute_final_matrices_out_of_order_bones_still_correct() {
 
     // bone index 0 = child (parent_index = 1), bone index 1 = parent
     let bones = vec![
-        bone("child", Some(1)),  // index 0 references parent at index 1
-        bone("parent", None),    // index 1 is the root
+        bone("child", Some(1)), // index 0 references parent at index 1
+        bone("parent", None),   // index 1 is the root
     ];
     let mut skel = Skeleton::new(bones);
     let locals = vec![child_local, parent_local];
@@ -556,7 +592,11 @@ fn compute_final_matrices_three_level_chain() {
     let finals = skel.compute_final_matrices(&locals);
 
     let cp = finals[2] * Vector4::new(0.0, 0.0, 0.0, 1.0);
-    assert!((cp.x - 3.0).abs() < 1e-4, "child world x should be 3, got {}", cp.x);
+    assert!(
+        (cp.x - 3.0).abs() < 1e-4,
+        "child world x should be 3, got {}",
+        cp.x
+    );
 }
 
 #[test]
@@ -570,4 +610,149 @@ fn compute_final_matrices_result_count_matches_bone_count() {
     let locals = vec![Matrix4::identity(); 4];
     let finals = skel.compute_final_matrices(&locals);
     assert_eq!(finals.len(), 4);
+}
+
+// ── Skeleton root_ancestor_transform ────────────────────────────────────
+
+#[test]
+fn compute_final_matrices_ancestor_default_identity() {
+    let mut skel = Skeleton::new(vec![bone("root", None)]);
+    let finals = skel.compute_final_matrices(&[Matrix4::identity()]);
+    assert!(approx_mat4_identity(finals[0]));
+}
+
+#[test]
+fn compute_final_matrices_ancestor_translation() {
+    let ancestor = Matrix4::from_translation(Vector3::new(10.0, 0.0, 0.0));
+    let mut skel = Skeleton::new(vec![bone("root", None)]);
+    skel.root_ancestor_transform = ancestor;
+
+    let finals = skel.compute_final_matrices(&[Matrix4::identity()]);
+    let p = finals[0] * Vector4::new(0.0, 0.0, 0.0, 1.0);
+    assert!(
+        (p.x - 10.0).abs() < 1e-4,
+        "expected ancestor translation x=10, got {}",
+        p.x
+    );
+}
+
+#[test]
+fn compute_final_matrices_ancestor_propagates_to_child() {
+    let ancestor = Matrix4::from_translation(Vector3::new(10.0, 0.0, 0.0));
+    let root_local = Matrix4::from_translation(Vector3::new(5.0, 0.0, 0.0));
+    let child_local = Matrix4::from_translation(Vector3::new(3.0, 0.0, 0.0));
+
+    let mut skel = Skeleton::new(vec![
+        bone("root", None),
+        bone("child", Some(0)),
+    ]);
+    skel.root_ancestor_transform = ancestor;
+
+    let finals = skel.compute_final_matrices(&[root_local, child_local]);
+
+    let rp = finals[0] * Vector4::new(0.0, 0.0, 0.0, 1.0);
+    assert!(
+        (rp.x - 15.0).abs() < 1e-4,
+        "root x should be ancestor(10) + root(5) = 15, got {}",
+        rp.x
+    );
+
+    let cp = finals[1] * Vector4::new(0.0, 0.0, 0.0, 1.0);
+    assert!(
+        (cp.x - 18.0).abs() < 1e-4,
+        "child x should be ancestor(10) + root(5) + child(3) = 18, got {}",
+        cp.x
+    );
+}
+
+#[test]
+fn compute_final_matrices_ancestor_with_offset() {
+    let ancestor = Matrix4::from_translation(Vector3::new(10.0, 0.0, 0.0));
+    let offset = Matrix4::from_translation(Vector3::new(1.0, 0.0, 0.0));
+    let mut b = bone("root", None);
+    b.offset_matrix = offset;
+    let mut skel = Skeleton::new(vec![b]);
+    skel.root_ancestor_transform = ancestor;
+
+    let finals = skel.compute_final_matrices(&[Matrix4::identity()]);
+    let p = finals[0] * Vector4::new(0.0, 0.0, 0.0, 1.0);
+    assert!(
+        (p.x - 11.0).abs() < 1e-4,
+        "expected ancestor(10) + offset(1) = 11, got {}",
+        p.x
+    );
+}
+
+#[test]
+fn compute_final_matrices_ancestor_scale() {
+    let ancestor = Matrix4::from_scale(2.0);
+    let root_local = Matrix4::from_translation(Vector3::new(5.0, 0.0, 0.0));
+
+    let mut skel = Skeleton::new(vec![bone("root", None)]);
+    skel.root_ancestor_transform = ancestor;
+
+    let finals = skel.compute_final_matrices(&[root_local]);
+    let p = finals[0] * Vector4::new(0.0, 0.0, 0.0, 1.0);
+    assert!(
+        (p.x - 10.0).abs() < 1e-4,
+        "expected scale(2) * translate(5,0,0) x=10, got {}",
+        p.x
+    );
+}
+
+// ── AnimationPlayer::evaluate bind pose with ancestor ────────────────────
+
+#[test]
+fn player_evaluate_no_clip_returns_bind_pose_including_ancestor() {
+    let ancestor = Matrix4::from_translation(Vector3::new(10.0, 0.0, 0.0));
+    let bind_local = Matrix4::from_translation(Vector3::new(5.0, 0.0, 0.0));
+    let mut skel = Skeleton::new(vec![bone_with_local("root", None, bind_local)]);
+    skel.root_ancestor_transform = ancestor;
+
+    let player = AnimationPlayer::new();
+
+    let matrices = player.evaluate(&mut skel);
+    assert_eq!(matrices.len(), 1);
+    let p = matrices[0] * Vector4::new(0.0, 0.0, 0.0, 1.0);
+    assert!(
+        (p.x - 15.0).abs() < 1e-4,
+        "bind pose x should be ancestor(10) + bind_local(5) = 15, got {}",
+        p.x
+    );
+}
+
+#[test]
+fn player_evaluate_no_clip_includes_ancestor_in_all_bones() {
+    let ancestor = Matrix4::from_scale(2.0);
+    let root_local = Matrix4::from_translation(Vector3::new(3.0, 4.0, 0.0));
+    let child_local = Matrix4::from_translation(Vector3::new(1.0, 0.0, 0.0));
+
+    let mut skel = Skeleton::new(vec![
+        bone_with_local("root", None, root_local),
+        bone_with_local("child", Some(0), child_local),
+    ]);
+    skel.root_ancestor_transform = ancestor;
+
+    let player = AnimationPlayer::new();
+    let matrices = player.evaluate(&mut skel);
+
+    // Root final = ancestor * root_local * offset(identity)
+    // = scale(2) * translate(3,4,0)
+    // Vertex at (0,0,0) → (6, 8, 0)
+    let rp = matrices[0] * Vector4::new(0.0, 0.0, 0.0, 1.0);
+    assert!(
+        (rp.x - 6.0).abs() < 1e-4 && (rp.y - 8.0).abs() < 1e-4,
+        "root bind pose should be (6, 8, 0), got ({}, {}, {})",
+        rp.x, rp.y, rp.z
+    );
+
+    // Child final = ancestor * root_local * child_local * offset(identity)
+    // = scale(2) * translate(3,4,0) * translate(1,0,0)
+    // Vertex at (0,0,0) → scale(2) * (4, 4, 0) = (8, 8, 0)
+    let cp = matrices[1] * Vector4::new(0.0, 0.0, 0.0, 1.0);
+    assert!(
+        (cp.x - 8.0).abs() < 1e-4 && (cp.y - 8.0).abs() < 1e-4,
+        "child bind pose should be (8, 8, 0), got ({}, {}, {})",
+        cp.x, cp.y, cp.z
+    );
 }

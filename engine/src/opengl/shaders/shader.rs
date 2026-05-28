@@ -1,3 +1,10 @@
+//! Shader compilation wrapper — every `unsafe { gl::* }` call is sound
+//! because:
+//! - `id` is always from `gl::CreateShader` (or zero for errors).
+//! - Source strings are null-terminated via `CString`.
+//! - Compilation errors are checked before the shader is used.
+//! - The caller must ensure the GL context is current.
+
 use std::ffi::CString;
 use std::ptr;
 
@@ -11,7 +18,7 @@ pub enum ShaderType {
 
 pub struct Shader {
     id: u32,
-    #[allow(dead_code)]  // retained for debug/introspection
+    #[allow(dead_code)] // retained for debug/introspection
     shader_type: ShaderType,
 }
 

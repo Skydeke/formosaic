@@ -283,7 +283,10 @@ fn orbit_controller_distance_preserved_after_rotation() {
     CameraController::control(&mut ctrl, &mut transform);
 
     let dist = (transform.position - ctrl.target).magnitude();
-    assert!((dist - 7.5).abs() < 0.01, "orbit radius should be preserved, got {dist}");
+    assert!(
+        (dist - 7.5).abs() < 0.01,
+        "orbit radius should be preserved, got {dist}"
+    );
 }
 
 #[test]
@@ -332,4 +335,17 @@ fn orbit_controller_normalized_axis_is_unit_length() {
     ctrl.snap_to_direction(&mut transform, dir);
     let offset = (transform.position - ctrl.target).normalize();
     assert!((offset.magnitude() - 1.0).abs() < 1e-5);
+}
+
+#[test]
+fn orbit_controller_retarget_preserves_camera_offset() {
+    let mut ctrl = OrbitController::new(Vector3::new(1.0, 2.0, 3.0), 5.0);
+    let mut transform = formosaic_engine::architecture::scene::node::transform::Transform::new();
+    transform.position = Vector3::new(1.0, 2.0, 8.0);
+
+    ctrl.set_target_preserve_offset(&mut transform, Vector3::new(4.0, 5.0, 6.0));
+
+    assert_vec3_approx(ctrl.target, Vector3::new(4.0, 5.0, 6.0), 1e-6);
+    assert_vec3_approx(transform.position, Vector3::new(4.0, 5.0, 11.0), 1e-6);
+    assert!((ctrl.distance - 5.0).abs() < 1e-6);
 }

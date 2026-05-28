@@ -185,13 +185,18 @@ impl SimpleTexture {
         self.bind();
         unsafe {
             gl::TexImage2D(
-                gl::TEXTURE_2D, 0, gl::RGBA as i32,
-                width, height, 0,
-                gl::RGBA, gl::UNSIGNED_BYTE,
+                gl::TEXTURE_2D,
+                0,
+                gl::RGBA as i32,
+                width,
+                height,
+                0,
+                gl::RGBA,
+                gl::UNSIGNED_BYTE,
                 data.as_ptr() as *const _,
             );
         }
-        self.width  = width;
+        self.width = width;
         self.height = height;
         self.allocated = true;
         self.unbind();

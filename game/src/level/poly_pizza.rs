@@ -17,7 +17,10 @@
 //! Results are polled each frame via `try_recv`.
 
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::{Arc, atomic::{AtomicUsize, Ordering}};
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
+};
 
 const API_BASE: &str = "https://api.poly.pizza/v1.1";
 
@@ -137,16 +140,24 @@ impl PolyPizzaClient {
         self.download_pending = true;
         let progress = Arc::new(AtomicUsize::new(0));
         self.progress_state = Some(progress.clone());
-        let tx  = self.download_tx.clone();
+        let tx = self.download_tx.clone();
         let ptx = self.progress_tx.clone();
-        let id  = summary.id.clone();
-        let nm  = summary.name.clone();
-        let au  = summary.author.clone();
-        let li  = summary.license.clone();
-        let su  = summary.source_url.clone();
-        let dl  = summary.download_url.clone();   // pre-known CDN URL if available
+        let id = summary.id.clone();
+        let nm = summary.name.clone();
+        let au = summary.author.clone();
+        let li = summary.license.clone();
+        let su = summary.source_url.clone();
+        let dl = summary.download_url.clone(); // pre-known CDN URL if available
         std::thread::spawn(move || {
-            let _ = tx.send(do_download(&id, &nm, &au, &li, &su, &dl, Some((ptx, progress))));
+            let _ = tx.send(do_download(
+                &id,
+                &nm,
+                &au,
+                &li,
+                &su,
+                &dl,
+                Some((ptx, progress)),
+            ));
         });
     }
 
@@ -179,7 +190,10 @@ impl PolyPizzaClient {
     }
 
     pub fn download_progress_bytes(&self) -> usize {
-        self.progress_state.as_ref().map(|p| p.load(Ordering::Relaxed)).unwrap_or(0)
+        self.progress_state
+            .as_ref()
+            .map(|p| p.load(Ordering::Relaxed))
+            .unwrap_or(0)
     }
 }
 
@@ -231,11 +245,19 @@ fn fetch_explore(_offset: usize, limit: usize) -> ExploreResult {
     log::info!("[PolyPizza] GET {} (animated discover total)", url0);
     let body0 = authed_get_string(&url0, &key)?;
 
-    let total    = json_number(&body0, "total").unwrap_or(lim as f64) as usize;
-    let max_page = if total > lim { (total / lim).saturating_sub(1) } else { 0 };
+    let total = json_number(&body0, "total").unwrap_or(lim as f64) as usize;
+    let max_page = if total > lim {
+        (total / lim).saturating_sub(1)
+    } else {
+        0
+    };
     log::info!("[PolyPizza] animated total={} max_page={}", total, max_page);
 
-    let page = if max_page > 0 { rand::rng().random_range(0..=max_page) } else { 0 };
+    let page = if max_page > 0 {
+        rand::rng().random_range(0..=max_page)
+    } else {
+        0
+    };
 
     let animated_body = if page == 0 {
         body0
@@ -250,7 +272,8 @@ fn fetch_explore(_offset: usize, limit: usize) -> ExploreResult {
 
     // ── CC-BY page 0 top-up (static, no pagination needed) ───────────────
     if let Ok(body) = authed_get_string(
-        &format!("{}/search?License=0&Limit={}&Page=0", API_BASE, lim), &key
+        &format!("{}/search?License=0&Limit={}&Page=0", API_BASE, lim),
+        &key,
     ) {
         if let Some(mut ccby) = parse_explore_v1(&body) {
             log::info!("[PolyPizza] CC-BY page 0 top-up: {} models", ccby.len());
@@ -268,10 +291,24 @@ fn fetch_explore(_offset: usize, limit: usize) -> ExploreResult {
 
 /// Download a model: use `known_dl_url` if non-empty (it comes from the search
 /// response `Download` field), otherwise fetch the model detail endpoint to get it.
-fn do_download(id: &str, name: &str, author: &str, license: &str, src: &str, known_dl_url: &str, progress: Option<(Sender<DownloadProgressResult>, Arc<AtomicUsize>)>) -> DownloadResult {
+fn do_download(
+    id: &str,
+    name: &str,
+    author: &str,
+    license: &str,
+    src: &str,
+    known_dl_url: &str,
+    progress: Option<(Sender<DownloadProgressResult>, Arc<AtomicUsize>)>,
+) -> DownloadResult {
     // Fast path: search response already gave us the CDN URL
-    let (dl_url, ext) = if !known_dl_url.is_empty() && (known_dl_url.contains(".glb") || known_dl_url.contains(".fbx")) {
-        log::info!("[PolyPizza] Using inline download URL for '{}': {}", id, known_dl_url);
+    let (dl_url, ext) = if !known_dl_url.is_empty()
+        && (known_dl_url.contains(".glb") || known_dl_url.contains(".fbx"))
+    {
+        log::info!(
+            "[PolyPizza] Using inline download URL for '{}': {}",
+            id,
+            known_dl_url
+        );
         (known_dl_url.to_string(), url_ext(known_dl_url))
     } else {
         // Slow path: fetch /model/{id} to get the Download field
@@ -281,31 +318,43 @@ fn do_download(id: &str, name: &str, author: &str, license: &str, src: &str, kno
         let body = authed_get_string(&detail_url, &key)
             .map_err(|e| format!("[PolyPizza] model detail fetch failed for '{}': {}", id, e))?;
         log::debug!("[PolyPizza] model detail: {:.1200}", body);
-        extract_download_url_v1(&body)
-            .ok_or_else(|| format!("[PolyPizza] no Download URL in model detail for '{}': {:.300}", id, body))?
+        extract_download_url_v1(&body).ok_or_else(|| {
+            format!(
+                "[PolyPizza] no Download URL in model detail for '{}': {:.300}",
+                id, body
+            )
+        })?
     };
 
     log::info!("[PolyPizza] Downloading '{}' from {}", name, dl_url);
     let bytes = if let Some((ptx, progress)) = &progress {
-        let result = authed_get_bytes_with_progress(&dl_url, Some((ptx.clone(), progress.clone())))?;
+        let result =
+            authed_get_bytes_with_progress(&dl_url, Some((ptx.clone(), progress.clone())))?;
         result
     } else {
         authed_get_bytes(&dl_url)?
     };
-    log::info!("[PolyPizza] Downloaded {} bytes for '{}'", bytes.len(), name);
+    log::info!(
+        "[PolyPizza] Downloaded {} bytes for '{}'",
+        bytes.len(),
+        name
+    );
 
     Ok(ModelDownload {
-        id:         id.to_string(),
-        name:       name.to_string(),
-        author:     author.to_string(),
-        license:    license.to_string(),
+        id: id.to_string(),
+        name: name.to_string(),
+        author: author.to_string(),
+        license: license.to_string(),
         source_url: src.to_string(),
-        file_ext:   ext,
+        file_ext: ext,
         bytes,
     })
 }
 
-fn authed_get_bytes_with_progress(url: &str, progress: Option<(Sender<DownloadProgressResult>, Arc<AtomicUsize>)>) -> Result<Vec<u8>, String> {
+fn authed_get_bytes_with_progress(
+    url: &str,
+    progress: Option<(Sender<DownloadProgressResult>, Arc<AtomicUsize>)>,
+) -> Result<Vec<u8>, String> {
     let resp = ureq::get(url)
         .call()
         .map_err(|e| format!("GET {}: {}", url, e))?;
@@ -318,11 +367,16 @@ fn authed_get_bytes_with_progress(url: &str, progress: Option<(Sender<DownloadPr
     loop {
         let n = std::io::Read::read(&mut reader, &mut chunk)
             .map_err(|e| format!("read body {}: {}", url, e))?;
-        if n == 0 { break; }
+        if n == 0 {
+            break;
+        }
         buf.extend_from_slice(&chunk[..n]);
         if let Some((ptx, state)) = &progress {
             state.store(buf.len(), Ordering::Relaxed);
-            let _ = ptx.send(Ok(DownloadProgress { downloaded_bytes: buf.len(), total_bytes: total }));
+            let _ = ptx.send(Ok(DownloadProgress {
+                downloaded_bytes: buf.len(),
+                total_bytes: total,
+            }));
         }
     }
     Ok(buf)
@@ -354,10 +408,7 @@ fn parse_explore_v1(body: &str) -> Option<Vec<ModelSummary>> {
     let objs = split_json_objects(arr);
     log::debug!("[PolyPizza] {} raw objects to parse", objs.len());
 
-    let out: Vec<ModelSummary> = objs
-        .iter()
-        .filter_map(|o| parse_summary_v1(o))
-        .collect();
+    let out: Vec<ModelSummary> = objs.iter().filter_map(|o| parse_summary_v1(o)).collect();
     log::info!("[PolyPizza] parsed {} summaries", out.len());
     Some(out)
 }
@@ -422,9 +473,10 @@ fn url_ext(url: &str) -> String {
 /// Extract a JSON number value (integer or float) by key.
 fn json_number(s: &str, key: &str) -> Option<f64> {
     let needle = format!("\"{}\":", key);
-    let start  = s.find(needle.as_str())? + needle.len();
-    let rest   = s[start..].trim_start();
-    let end    = rest.find(|c: char| !c.is_ascii_digit() && c != '.' && c != '-')
+    let start = s.find(needle.as_str())? + needle.len();
+    let rest = s[start..].trim_start();
+    let end = rest
+        .find(|c: char| !c.is_ascii_digit() && c != '.' && c != '-')
         .unwrap_or(rest.len());
     rest[..end].parse().ok()
 }

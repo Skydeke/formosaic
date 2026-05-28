@@ -1,70 +1,77 @@
-use std::any::Any;
 use cgmath::Vector2;
+use std::any::Any;
 use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::{
     architecture::scene::node::scenegraph::Scenegraph,
+    opengl::objects::clip_plane::ClipPlane,
     rendering::{
         instances::camera::camera::Camera,
         render_output_data::RenderOutputData,
         render_state::{HintRenderState, LightConfig},
     },
-    opengl::objects::clip_plane::ClipPlane,
 };
 
 pub struct SceneContext {
-    clip_plane:  ClipPlane,
-    scene:       Option<Scenegraph>,
+    clip_plane: ClipPlane,
+    scene: Option<Scenegraph>,
     output_data: Option<RenderOutputData>,
-    camera:      Rc<RefCell<Camera>>,
+    camera: Rc<RefCell<Camera>>,
 
     // ── Per-frame render state — written by the game layer, read by renderers ──
     /// Scene lighting — read by the deferred lighting pass.
-    pub lights:          LightConfig,
+    pub lights: LightConfig,
     /// Hint overlay state — None means no hint active.
-    pub hints:           Option<HintRenderState>,
+    pub hints: Option<HintRenderState>,
     /// Seconds since solve — None means not solved.
-    pub solved_timer:    Option<f32>,
+    pub solved_timer: Option<f32>,
     /// Whether the menu overlay is currently showing.
-    pub show_menu:       bool,
+    pub show_menu: bool,
     /// Whether the platform is touch-only (Android).
-    pub is_touch:        bool,
+    pub is_touch: bool,
     /// Frame delta time in seconds.
-    pub delta_time:      f32,
+    pub delta_time: f32,
 
     ui_actions: Vec<Box<dyn Any>>,
-
 }
 
 impl SceneContext {
     pub fn new() -> Self {
         let camera = Rc::new(RefCell::new(Camera::new()));
         Self {
-            clip_plane:      ClipPlane::NONE,
-            scene:           Some(Scenegraph::new()),
-            output_data:     None,
+            clip_plane: ClipPlane::NONE,
+            scene: Some(Scenegraph::new()),
+            output_data: None,
             camera,
-            lights:          LightConfig::default(),
-            hints:           None,
-            solved_timer:    None,
-            show_menu:       false,
-            is_touch:        false,
-            delta_time:      0.0,
-            ui_actions:      Vec::new(),
+            lights: LightConfig::default(),
+            hints: None,
+            solved_timer: None,
+            show_menu: false,
+            is_touch: false,
+            delta_time: 0.0,
+            ui_actions: Vec::new(),
         }
     }
 
-    pub fn get_clip_plane(&self) -> &ClipPlane { &self.clip_plane }
-    pub fn clip_plane(&self)     -> ClipPlane  { self.clip_plane }
+    pub fn get_clip_plane(&self) -> &ClipPlane {
+        &self.clip_plane
+    }
+    pub fn clip_plane(&self) -> ClipPlane {
+        self.clip_plane
+    }
 
     pub fn set_clip_plane(&mut self, clip_plane: ClipPlane) {
         self.clip_plane = clip_plane;
     }
 
-    pub fn scene(&self) -> Option<&Scenegraph> { self.scene.as_ref() }
+    pub fn scene(&self) -> Option<&Scenegraph> {
+        self.scene.as_ref()
+    }
 
-    pub fn output_data(&self) -> Option<&RenderOutputData> { self.output_data.as_ref() }
+    pub fn output_data(&self) -> Option<&RenderOutputData> {
+        self.output_data.as_ref()
+    }
     pub fn set_output_data(&mut self, output_data: RenderOutputData) {
         self.output_data = Some(output_data);
     }
@@ -74,7 +81,9 @@ impl SceneContext {
     }
 
     pub fn update(&mut self) {
-        if let Some(scene) = &mut self.scene { scene.update(); }
+        if let Some(scene) = &mut self.scene {
+            scene.update();
+        }
         self.camera.borrow_mut().update();
     }
 
@@ -104,5 +113,7 @@ impl SceneContext {
 }
 
 impl Default for SceneContext {
-    fn default() -> Self { Self::new() }
+    fn default() -> Self {
+        Self::new()
+    }
 }

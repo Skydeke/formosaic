@@ -1,26 +1,28 @@
 use crate::{
     architecture::models::material::Material,
-    rendering::abstracted::renderable::Renderable,
     opengl::{
         constants::{data_type::DataType, render_mode::RenderMode, vbo_usage::VboUsage},
         objects::{attribute::Attribute, data_buffer::DataBuffer, vao::Vao},
     },
+    rendering::abstracted::renderable::Renderable,
 };
-use cgmath::{InnerSpace, Matrix3, Matrix4, SquareMatrix, Vector3};
+use cgmath::{InnerSpace, Vector3};
+use std::cell::Cell;
 use std::rc::Rc;
 
 pub struct Mesh {
-    positions:        Vec<f32>,
-    scramble_offsets: Vec<f32>,
-    pos_buffer:       Option<Rc<DataBuffer>>,
-    vert:             Vec<f32>,
-    attributes:       Vec<Attribute>,
-    vao:              Vao,
-    material:         Option<Material>,
+    positions: Vec<f32>,
+    displacement_offsets: Vec<f32>,
+    pos_buffer: Option<Rc<DataBuffer>>,
+    vert: Vec<f32>,
+    attributes: Vec<Attribute>,
+    vao: Vao,
+    material: Option<Material>,
     has_vertex_colors: bool,
-    bone_indices:     Vec<[i32; 4]>,
-    bone_weights:     Vec<[f32; 4]>,
-    is_skinned:       bool,
+    bone_indices: Vec<[i32; 4]>,
+    bone_weights: Vec<[f32; 4]>,
+    is_skinned: bool,
+    current_displacement_lerp: Cell<f32>,
 }
 
 impl Mesh {
@@ -30,20 +32,25 @@ impl Mesh {
     /// as `positions`).  Pass an empty `Vec` when the mesh has no vertex colors.
     pub fn from_raw(
         positions: Vec<f32>,
-        normals:   Vec<f32>,
+        normals: Vec<f32>,
         texcoords: Vec<f32>,
-        indices:   Vec<u32>,
-        colors:    Vec<f32>,
+        indices: Vec<u32>,
+        colors: Vec<f32>,
         bone_indices: Vec<[i32; 4]>,
         bone_weights: Vec<[f32; 4]>,
     ) -> Self {
-        let tri_count  = indices.len() / 3;
+        let tri_count = indices.len() / 3;
         let vert_count = tri_count * 3;
 
-        let mut flat_pos    = Vec::with_capacity(vert_count * 3);
-        let mut flat_norm   = Vec::with_capacity(vert_count * 3);
-        let mut flat_tex    = Vec::with_capacity(if texcoords.is_empty() { 0 } else { vert_count * 2 });
-        let mut flat_colors = Vec::with_capacity(if colors.is_empty()    { 0 } else { vert_count * 4 });
+        let mut flat_pos = Vec::with_capacity(vert_count * 3);
+        let mut flat_norm = Vec::with_capacity(vert_count * 3);
+        let mut flat_tex = Vec::with_capacity(if texcoords.is_empty() {
+            0
+        } else {
+            vert_count * 2
+        });
+        let mut flat_colors =
+            Vec::with_capacity(if colors.is_empty() { 0 } else { vert_count * 4 });
         let has_bones = bone_indices
             .iter()
             .any(|indices| indices.iter().any(|&idx| idx >= 0));
@@ -118,14 +125,17 @@ impl Mesh {
 
         // ── Build VAO ────────────────────────────────────────────────────────
 
-        // location 0: positions (dynamic — scramble re-uploads here)
+        // location 0: positions (dynamic — displacement re-uploads here)
         let mut pos_buf = DataBuffer::new(VboUsage::DynamicDraw);
         pos_buf.allocate_float(flat_pos.len());
         pos_buf.store_float(0, &flat_pos);
         let pos_buffer = Rc::new(pos_buf);
 
         let mut vao = Vao::create();
-        vao.load_data_buffer(pos_buffer.clone(), &[Attribute::of(0, 3, DataType::Float, false)]);
+        vao.load_data_buffer(
+            pos_buffer.clone(),
+            &[Attribute::of(0, 3, DataType::Float, false)],
+        );
 
         // location 1: UVs
         if !flat_tex.is_empty() {
@@ -163,7 +173,11 @@ impl Mesh {
         if has_bones {
             let mut buf = DataBuffer::new(VboUsage::StaticDraw);
             buf.allocate_int(flat_bone_indices.len() * 4);
-            let flat: Vec<i32> = flat_bone_indices.iter().flat_map(|arr| arr.iter()).copied().collect();
+            let flat: Vec<i32> = flat_bone_indices
+                .iter()
+                .flat_map(|arr| arr.iter())
+                .copied()
+                .collect();
             buf.store_int(0, &flat);
             vao.load_data_buffer(Rc::new(buf), &[Attribute::of(3, 4, DataType::Int, false)]);
         } else {
@@ -178,24 +192,29 @@ impl Mesh {
         if has_bones {
             let mut buf = DataBuffer::new(VboUsage::StaticDraw);
             buf.allocate_float(flat_bone_weights.len() * 4);
-            let flat: Vec<f32> = flat_bone_weights.iter().flat_map(|arr| arr.iter()).copied().collect();
+            let flat: Vec<f32> = flat_bone_weights
+                .iter()
+                .flat_map(|arr| arr.iter())
+                .copied()
+                .collect();
             buf.store_float(0, &flat);
             vao.load_data_buffer(Rc::new(buf), &[Attribute::of(4, 4, DataType::Float, false)]);
         } else {
             let mut buf = DataBuffer::new(VboUsage::StaticDraw);
-            let weights: Vec<f32> = (0..vert_count).flat_map(|_| [1.0f32, 0.0, 0.0, 0.0]).collect();
+            let weights: Vec<f32> = (0..vert_count)
+                .flat_map(|_| [1.0f32, 0.0, 0.0, 0.0])
+                .collect();
             buf.allocate_float(weights.len());
             buf.store_float(0, &weights);
             vao.load_data_buffer(Rc::new(buf), &[Attribute::of(4, 4, DataType::Float, false)]);
         }
 
-        let n    = flat_pos.len();
-        let vert = flat_pos.clone();
+        let n = flat_pos.len();
         Self {
-            scramble_offsets: vec![0.0; n],
+            displacement_offsets: vec![0.0; n],
             positions: flat_pos,
             pos_buffer: Some(pos_buffer),
-            vert,
+            vert: Vec::new(), // populated lazily by from_vao; not needed here
             attributes: vec![],
             vao,
             material: None,
@@ -203,6 +222,7 @@ impl Mesh {
             bone_indices: flat_bone_indices,
             bone_weights: flat_bone_weights,
             is_skinned: has_bones,
+            current_displacement_lerp: Cell::new(0.0),
         }
     }
 
@@ -210,7 +230,7 @@ impl Mesh {
     pub fn from_vao(vao: Vao) -> Self {
         Self {
             positions: vec![],
-            scramble_offsets: vec![],
+            displacement_offsets: vec![],
             pos_buffer: None,
             vert: vec![],
             attributes: vec![],
@@ -220,31 +240,22 @@ impl Mesh {
             bone_indices: vec![],
             bone_weights: vec![],
             is_skinned: false,
+            current_displacement_lerp: Cell::new(0.0),
         }
     }
 
-    pub fn scramble_along_axis(
-        &mut self,
-        axis: Vector3<f32>,
-        min_disp: f32,
-        max_disp: f32,
-        mesh_transform: Matrix4<f32>,
-    ) {
-        let pos_buffer = match &self.pos_buffer {
-            Some(b) => b.clone(),
-            None => {
-                log::warn!("[Mesh] scramble_along_axis on legacy mesh — skipping.");
-                return;
-            }
-        };
-
-        if self.positions.is_empty() { return; }
-
-        self.scramble_offsets = compute_scramble_offsets(
-            self.positions.len(),
-            axis, min_disp, max_disp, mesh_transform,
-        );
-        self.upload_at_t(1.0, &pos_buffer);
+    pub fn set_displacement_offsets(&mut self, offsets: Vec<f32>) {
+        if self.pos_buffer.is_none() {
+            log::warn!("[Mesh] set_displacement_offsets on legacy mesh — skipping.");
+            return;
+        }
+        if self.positions.is_empty() {
+            return;
+        }
+        self.displacement_offsets = offsets;
+        if let Some(buf) = &self.pos_buffer {
+            self.upload_at_t(1.0, buf);
+        }
     }
 
     pub fn upload_lerp(&self, t: f32) {
@@ -254,32 +265,64 @@ impl Mesh {
     }
 
     fn upload_at_t(&self, t: f32, buf: &Rc<DataBuffer>) {
+        self.current_displacement_lerp.set(t);
         let n = self.positions.len();
         let mut data = vec![0.0f32; n];
         for i in 0..n {
-            data[i] = self.positions[i] + self.scramble_offsets[i] * t;
+            data[i] = self.positions[i] + self.displacement_offsets[i] * t;
         }
         buf.store_float_shared(0, &data);
     }
 
     pub fn lowest(&self) -> f32 {
         let mut ret = f32::INFINITY;
-        let stride = self.attributes.first().map_or(3, |a| a.bytes_per_vertex() / 4);
-        let data = if !self.positions.is_empty() { &self.positions } else { &self.vert };
-        if stride == 0 || data.is_empty() { return ret; }
+        let stride = self
+            .attributes
+            .first()
+            .map_or(3, |a| a.bytes_per_vertex() / 4);
+        let data = if !self.positions.is_empty() {
+            &self.positions
+        } else {
+            &self.vert
+        };
+        if stride == 0 || data.is_empty() {
+            return ret;
+        }
         for i in (1..data.len()).step_by(stride) {
-            if data[i] < ret { ret = data[i]; }
+            if data[i] < ret {
+                ret = data[i];
+            }
         }
         ret
     }
 
-    pub fn positions(&self)          -> &[f32]         { &self.positions }
-    pub fn has_vertex_colors(&self)  -> bool           { self.has_vertex_colors }
-    pub fn is_skinned(&self)         -> bool           { self.is_skinned }
-    pub fn set_material(&mut self, mat: Material)      { self.material = Some(mat); }
-    pub fn material(&self)           -> Option<&Material> { self.material.as_ref() }
-    pub fn bone_indices(&self)       -> &[[i32; 4]]    { &self.bone_indices }
-    pub fn bone_weights(&self)       -> &[[f32; 4]]    { &self.bone_weights }
+    pub fn positions(&self) -> &[f32] {
+        &self.positions
+    }
+    pub fn displacement_offsets(&self) -> &[f32] {
+        &self.displacement_offsets
+    }
+    pub fn current_displacement_lerp(&self) -> f32 {
+        self.current_displacement_lerp.get()
+    }
+    pub fn has_vertex_colors(&self) -> bool {
+        self.has_vertex_colors
+    }
+    pub fn is_skinned(&self) -> bool {
+        self.is_skinned
+    }
+    pub fn set_material(&mut self, mat: Material) {
+        self.material = Some(mat);
+    }
+    pub fn material(&self) -> Option<&Material> {
+        self.material.as_ref()
+    }
+    pub fn bone_indices(&self) -> &[[i32; 4]] {
+        &self.bone_indices
+    }
+    pub fn bone_weights(&self) -> &[[f32; 4]] {
+        &self.bone_weights
+    }
 
     pub fn delete(&mut self, delete_vbos: bool) {
         self.vao.delete(delete_vbos);
@@ -295,71 +338,15 @@ impl Renderable for Mesh {
     fn render(&self, render_mode: RenderMode) {
         let vert_count = (self.positions.len() / 3) as i32;
         if vert_count > 0 {
-            unsafe { gl::DrawArrays(render_mode.value(), 0, vert_count); }
+            unsafe {
+                gl::DrawArrays(render_mode.value(), 0, vert_count);
+            }
         }
     }
 }
 
 impl Mesh {
-    pub fn unbind(&self) { self.vao.unbind(); }
-
-    pub fn scramble_offsets(&self) -> &[f32] { &self.scramble_offsets }
-}
-
-/// Compute per-vertex scramble offsets for a triangle mesh.
-///
-/// Each triangle's three vertices receive the *same* random displacement
-/// along `axis` (transformed into the mesh's local frame), with magnitude
-/// in `[min_disp, max_disp]`.
-///
-/// `vertex_count` = total number of float values (vertices × 3).
-/// `mesh_transform` = the mesh's local-to-model transform — the axis is
-/// rotated into mesh-local space so the displacement follows the original
-/// geometry regardless of node-hierarchy transforms applied during loading.
-pub fn compute_scramble_offsets(
-    vertex_count: usize,
-    axis: Vector3<f32>,
-    min_disp: f32,
-    max_disp: f32,
-    mesh_transform: Matrix4<f32>,
-) -> Vec<f32> {
-    use cgmath::InnerSpace;
-    use rand::Rng;
-
-    if vertex_count == 0 { return vec![]; }
-
-    let axis = axis.normalize();
-    let basis = Matrix3::new(
-        mesh_transform.x.x, mesh_transform.x.y, mesh_transform.x.z,
-        mesh_transform.y.x, mesh_transform.y.y, mesh_transform.y.z,
-        mesh_transform.z.x, mesh_transform.z.y, mesh_transform.z.z,
-    );
-    let inv_basis = basis.invert().unwrap_or(Matrix3::from_scale(1.0));
-    let mut rng = rand::rng();
-    let mut offsets = vec![0.0f32; vertex_count];
-
-    let tri_count = vertex_count / 9;
-    for tri in 0..tri_count {
-        let amount: f32 = rng.random_range(min_disp..max_disp);
-        let disp = inv_basis * (axis * amount);
-        let base = tri * 9;
-        for corner in 0..3 {
-            let v = base + corner * 3;
-            offsets[v]     = disp.x;
-            offsets[v + 1] = disp.y;
-            offsets[v + 2] = disp.z;
-        }
+    pub fn unbind(&self) {
+        self.vao.unbind();
     }
-    offsets
-}
-
-/// Apply the lerp formula `positions[i] + offsets[i] * t` to compute
-/// interpolated vertex data (pure math, no GL).
-pub fn lerp_positions(positions: &[f32], offsets: &[f32], t: f32) -> Vec<f32> {
-    let n = positions.len().min(offsets.len());
-    let mut data = vec![0.0f32; n];
-    for i in 0..n {
-        data[i] = positions[i] + offsets[i] * t;
-    }
-    data
 }

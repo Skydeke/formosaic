@@ -12,13 +12,13 @@
 
 pub mod asset_loader;
 pub mod formosaic;
-pub mod ui;
-pub mod rendering;
 pub mod input;
 pub mod level;
 pub mod puzzle;
+pub mod rendering;
+pub mod ui;
 
 pub use formosaic::Formosaic;
 // Re-export engine types so examples don't need to depend on the engine crate directly.
-pub use formosaic_engine::app::game_engine::GameEngine;
 pub use formosaic_engine::app::application::Application;
+pub use formosaic_engine::app::game_engine::GameEngine;

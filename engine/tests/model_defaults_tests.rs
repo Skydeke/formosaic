@@ -20,12 +20,24 @@ impl Model for DummyModel {
     fn bind_and_configure(&self, _mesh_idx: usize) {}
     fn unbind(&self, _mesh_idx: usize) {}
     fn delete(&mut self) {}
-    fn get_lowest(&self) -> f32 { 0.0 }
-    fn get_meshes(&self) -> &[Mesh] { &self.meshes }
-    fn centroid(&self) -> Option<Vector3<f32>> { None }
-    fn mesh_transform(&self, _mesh_idx: usize) -> Option<Matrix4<f32>> { None }
-    fn get_material(&self, _mesh_idx: usize) -> Option<&Material> { None }
-    fn has_vertex_colors(&self, _mesh_idx: usize) -> bool { false }
+    fn get_lowest(&self) -> f32 {
+        0.0
+    }
+    fn get_meshes(&self) -> &[Mesh] {
+        &self.meshes
+    }
+    fn centroid(&self) -> Option<Vector3<f32>> {
+        None
+    }
+    fn mesh_transform(&self, _mesh_idx: usize) -> Option<Matrix4<f32>> {
+        None
+    }
+    fn get_material(&self, _mesh_idx: usize) -> Option<&Material> {
+        None
+    }
+    fn has_vertex_colors(&self, _mesh_idx: usize) -> bool {
+        false
+    }
 }
 
 #[test]

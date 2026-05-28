@@ -1,7 +1,7 @@
 use formosaic_engine::architecture::scene::node::node::{Node, NodeBehavior};
 use formosaic_engine::architecture::scene::node::scenegraph::Scenegraph;
-use formosaic_engine::rendering::render_state::{HintRenderState, LightConfig};
 use formosaic_engine::opengl::objects::clip_plane::ClipPlane;
+use formosaic_engine::rendering::render_state::{HintRenderState, LightConfig};
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -149,7 +149,10 @@ fn scene_context_default_impl() {
 #[test]
 fn scene_context_clip_plane_getter_setter() {
     let mut ctx = formosaic_engine::architecture::scene::scene_context::SceneContext::new();
-    assert_eq!(ctx.get_clip_plane().get_value(), ClipPlane::NONE.get_value());
+    assert_eq!(
+        ctx.get_clip_plane().get_value(),
+        ClipPlane::NONE.get_value()
+    );
 
     let cp = ClipPlane::of_above(10.0);
     ctx.set_clip_plane(cp);
@@ -168,7 +171,9 @@ fn scene_context_light_config_is_default() {
 fn scene_context_camera_is_always_available() {
     let ctx = formosaic_engine::architecture::scene::scene_context::SceneContext::new();
     let _cam = ctx.get_camera();
-    let _cam_ref: &std::cell::RefCell<formosaic_engine::rendering::instances::camera::camera::Camera> = ctx.camera();
+    let _cam_ref: &std::cell::RefCell<
+        formosaic_engine::rendering::instances::camera::camera::Camera,
+    > = ctx.camera();
 }
 
 #[test]
@@ -262,7 +267,8 @@ fn node_children_slice_reference() {
     let node: Rc<RefCell<dyn NodeBehavior>> = Rc::new(RefCell::new(Node::new()));
     let child: Rc<RefCell<dyn NodeBehavior>> = Rc::new(RefCell::new(Node::new()));
 
-    node.borrow_mut().add_child_impl(Rc::clone(&node), Rc::clone(&child));
+    node.borrow_mut()
+        .add_child_impl(Rc::clone(&node), Rc::clone(&child));
 
     let binding = node.borrow();
     let slice = binding.children();

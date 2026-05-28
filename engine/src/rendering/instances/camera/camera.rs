@@ -1,7 +1,6 @@
 use crate::architecture::scene::node::transform::Transform;
 use crate::rendering::abstracted::camera::camera_projection::CameraProjection;
-use crate::rendering::instances::camera::camera_controller::CameraController;
-use crate::rendering::instances::camera::camera_controller::NoneController;
+use crate::rendering::instances::camera::camera_controller::{CameraController, NoneController};
 use crate::rendering::instances::camera::perspective_projection::PerspectiveProjection;
 use cgmath::Vector2;
 use cgmath::{EuclideanSpace, Matrix4, Point3, SquareMatrix};

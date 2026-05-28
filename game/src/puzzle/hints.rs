@@ -35,7 +35,7 @@ use cgmath::{InnerSpace, Vector3};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum HintTier {
     #[default]
-    None  = 0,
+    None = 0,
     WarmCold = 1,
     AxisPlane = 2,
     GhostSnap = 3,
@@ -44,7 +44,7 @@ pub enum HintTier {
 impl HintTier {
     pub fn next(self) -> Self {
         match self {
-            HintTier::None     => HintTier::WarmCold,
+            HintTier::None => HintTier::WarmCold,
             HintTier::WarmCold => HintTier::AxisPlane,
             HintTier::AxisPlane => HintTier::GhostSnap,
             HintTier::GhostSnap => HintTier::GhostSnap, // stays at max
@@ -118,7 +118,7 @@ impl HintSystem {
         camera_fwd: Vector3<f32>,
         solution_dir: Vector3<f32>,
     ) -> HintOutput {
-        let dot    = camera_fwd.normalize().dot(solution_dir.normalize());
+        let dot = camera_fwd.normalize().dot(solution_dir.normalize());
         let warmth = (dot.abs() + 1.0) * 0.5; // 0.5 = perpendicular, 1 = on-axis
 
         // Ghost snap: slowly un-scramble over ~5 s.
@@ -132,10 +132,14 @@ impl HintSystem {
             tier: self.tier,
             warmth,
             warmth_color,
-            show_disc:    self.tier as u8 >= HintTier::AxisPlane as u8,
-            disc_normal:  solution_dir,
-            ghost_lerp:   if self.tier == HintTier::GhostSnap { self.ghost_lerp } else { 0.0 },
-            hint_count:   self.hint_count,
+            show_disc: self.tier as u8 >= HintTier::AxisPlane as u8,
+            disc_normal: solution_dir,
+            ghost_lerp: if self.tier == HintTier::GhostSnap {
+                self.ghost_lerp
+            } else {
+                0.0
+            },
+            hint_count: self.hint_count,
         }
     }
 

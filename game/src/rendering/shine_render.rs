@@ -6,10 +6,6 @@
 
 use formosaic_engine::{
     architecture::scene::scene_context::SceneContext,
-    rendering::abstracted::{
-        irenderer::{IRenderer, RenderPass},
-        processable::NoopProcessable,
-    },
     opengl::{
         constants::data_type::DataType,
         fbos::simple_texture::SimpleTexture,
@@ -20,6 +16,10 @@ use formosaic_engine::{
         },
         textures::texture::Texture,
     },
+    rendering::abstracted::{
+        irenderer::{IRenderer, RenderPass},
+        processable::NoopProcessable,
+    },
 };
 use std::{cell::RefCell, rc::Rc};
 
@@ -27,15 +27,15 @@ const DEFAULT_VERT: &str = include_str!("../../assets/shaders/shine.vert.glsl");
 const DEFAULT_FRAG: &str = include_str!("../../assets/shaders/shine.frag.glsl");
 
 struct FrameState {
-    solved_timer:    f32,  // negative = not solved
+    solved_timer: f32, // negative = not solved
     position_tex_id: u32,
-    albedo_tex_id:   u32,
+    albedo_tex_id: u32,
 }
 
 pub struct ShineRenderer {
-    vao:    Vao,
+    vao: Vao,
     shader: ShaderProgram<NoopProcessable>,
-    frame:  Rc<RefCell<FrameState>>,
+    frame: Rc<RefCell<FrameState>>,
 }
 
 impl ShineRenderer {
@@ -57,9 +57,9 @@ impl ShineRenderer {
         );
 
         let frame = Rc::new(RefCell::new(FrameState {
-            solved_timer:    -1.0,
+            solved_timer: -1.0,
             position_tex_id: 0,
-            albedo_tex_id:   0,
+            albedo_tex_id: 0,
         }));
 
         let mut shader = ShaderProgram::<NoopProcessable>::from_sources(vert, frag)?;
@@ -81,8 +81,11 @@ impl ShineRenderer {
                 uniform: UniformTexture::new("uPosition", 0),
                 extractor: Box::new(move |_: &RenderState<NoopProcessable>| {
                     let id = f.borrow().position_tex_id;
-                    if id == 0 { None }
-                    else { Some(Rc::new(SimpleTexture::new(id)) as Rc<dyn Texture>) }
+                    if id == 0 {
+                        None
+                    } else {
+                        Some(Rc::new(SimpleTexture::new(id)) as Rc<dyn Texture>)
+                    }
                 }),
             }));
         }
@@ -93,8 +96,11 @@ impl ShineRenderer {
                 uniform: UniformTexture::new("uAlbedo", 1),
                 extractor: Box::new(move |_: &RenderState<NoopProcessable>| {
                     let id = f.borrow().albedo_tex_id;
-                    if id == 0 { None }
-                    else { Some(Rc::new(SimpleTexture::new(id)) as Rc<dyn Texture>) }
+                    if id == 0 {
+                        None
+                    } else {
+                        Some(Rc::new(SimpleTexture::new(id)) as Rc<dyn Texture>)
+                    }
                 }),
             }));
         }
@@ -105,19 +111,27 @@ impl ShineRenderer {
 }
 
 impl IRenderer for ShineRenderer {
-    fn pass(&self) -> RenderPass { RenderPass::Overlay }
+    fn pass(&self) -> RenderPass {
+        RenderPass::Overlay
+    }
 
     fn render(&mut self, context: &SceneContext) {
-        let timer  = match context.solved_timer { Some(t) => t, None => return };
-        let output = match context.output_data() { Some(d) => d, None => return };
+        let timer = match context.solved_timer {
+            Some(t) => t,
+            None => return,
+        };
+        let output = match context.output_data() {
+            Some(d) => d,
+            None => return,
+        };
 
         // Write current frame's texture IDs and timer into shared state so the
         // UniformAdapter extractors pick them up in update_per_render_uniforms.
         {
             let mut f = self.frame.borrow_mut();
-            f.solved_timer    = timer;
+            f.solved_timer = timer;
             f.position_tex_id = output.position.get_id();
-            f.albedo_tex_id   = output.colour.get_id();
+            f.albedo_tex_id = output.colour.get_id();
         }
 
         unsafe {
@@ -137,7 +151,9 @@ impl IRenderer for ShineRenderer {
 
         self.vao.bind();
         self.vao.enable_attributes();
-        unsafe { gl::DrawArrays(gl::TRIANGLES, 0, 6); }
+        unsafe {
+            gl::DrawArrays(gl::TRIANGLES, 0, 6);
+        }
         self.vao.unbind();
         self.shader.unbind();
 

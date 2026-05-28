@@ -26,8 +26,7 @@ use crate::opengl::{
     },
     textures::{
         parameters::{
-            mag_filter_parameter::MagFilterParameter,
-            min_filter_parameter::MinFilterParameter,
+            mag_filter_parameter::MagFilterParameter, min_filter_parameter::MinFilterParameter,
         },
         texture::Texture,
         texture_configs::TextureConfigs,
@@ -40,16 +39,18 @@ use crate::rendering::abstracted::{
 
 // ─── Internal GL state ────────────────────────────────────────────────────────
 
-struct FrameState { proj: Matrix4<f32> }
+struct FrameState {
+    proj: Matrix4<f32>,
+}
 
 // ─── GL resource bundle (borrowable independently from imgui::Context) ────────
 
 struct GlResources {
-    shader:   ShaderProgram<NoopProcessable>,
-    frame:    Rc<RefCell<FrameState>>,
-    vao:      Vao,
-    vbo:      Vbo,
-    ebo:      Vbo,
+    shader: ShaderProgram<NoopProcessable>,
+    frame: Rc<RefCell<FrameState>>,
+    vao: Vao,
+    vbo: Vbo,
+    ebo: Vbo,
     #[allow(dead_code)]
     font_tex: SimpleTexture,
 }
@@ -63,26 +64,47 @@ impl GlResources {
     fn draw(&mut self, draw_data: &DrawData) {
         let fb_w = draw_data.display_size[0] * draw_data.framebuffer_scale[0];
         let fb_h = draw_data.display_size[1] * draw_data.framebuffer_scale[1];
-        if fb_w <= 0.0 || fb_h <= 0.0 || draw_data.total_vtx_count == 0 { return; }
+        if fb_w <= 0.0 || fb_h <= 0.0 || draw_data.total_vtx_count == 0 {
+            return;
+        }
 
         let [dl, dt] = draw_data.display_pos;
-        let [dr, db] = [dl + draw_data.display_size[0], dt + draw_data.display_size[1]];
+        let [dr, db] = [
+            dl + draw_data.display_size[0],
+            dt + draw_data.display_size[1],
+        ];
         self.frame.borrow_mut().proj = Matrix4::new(
-             2.0/(dr-dl),        0.0,          0.0, 0.0,
-             0.0,          2.0/(dt-db),         0.0, 0.0,
-             0.0,                0.0,          -1.0, 0.0,
-            (dr+dl)/(dl-dr), (dt+db)/(db-dt),   0.0, 1.0,
+            2.0 / (dr - dl),
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            2.0 / (dt - db),
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            -1.0,
+            0.0,
+            (dr + dl) / (dl - dr),
+            (dt + db) / (db - dt),
+            0.0,
+            1.0,
         );
 
         let mut prev_scissor = [0i32; 4];
         let prev_scissor_test = unsafe { gl::IsEnabled(gl::SCISSOR_TEST) };
-        unsafe { gl::GetIntegerv(gl::SCISSOR_BOX, prev_scissor.as_mut_ptr()); }
+        unsafe {
+            gl::GetIntegerv(gl::SCISSOR_BOX, prev_scissor.as_mut_ptr());
+        }
         unsafe {
             gl::Enable(gl::BLEND);
             gl::BlendEquation(gl::FUNC_ADD);
             gl::BlendFuncSeparate(
-                gl::SRC_ALPHA, gl::ONE_MINUS_SRC_ALPHA,
-                gl::ONE,       gl::ONE_MINUS_SRC_ALPHA,
+                gl::SRC_ALPHA,
+                gl::ONE_MINUS_SRC_ALPHA,
+                gl::ONE,
+                gl::ONE_MINUS_SRC_ALPHA,
             );
             gl::Disable(gl::CULL_FACE);
             gl::Disable(gl::DEPTH_TEST);
@@ -107,23 +129,37 @@ impl GlResources {
                         let cy = (cmd_params.clip_rect[1] - co[1]) * cs[1];
                         let cw = (cmd_params.clip_rect[2] - co[0]) * cs[0];
                         let ch = (cmd_params.clip_rect[3] - co[1]) * cs[1];
-                        if cw <= cx || ch <= cy { continue; }
+                        if cw <= cx || ch <= cy {
+                            continue;
+                        }
                         let idx_type = if mem::size_of::<DrawIdx>() == 2 {
                             gl::UNSIGNED_SHORT
-                        } else { gl::UNSIGNED_INT };
+                        } else {
+                            gl::UNSIGNED_INT
+                        };
                         unsafe {
-                            gl::Scissor(cx as i32, (fb_h - ch) as i32,
-                                        (cw - cx) as i32, (ch - cy) as i32);
+                            gl::Scissor(
+                                cx as i32,
+                                (fb_h - ch) as i32,
+                                (cw - cx) as i32,
+                                (ch - cy) as i32,
+                            );
                             gl::ActiveTexture(gl::TEXTURE0);
                             gl::BindTexture(gl::TEXTURE_2D, cmd_params.texture_id.id() as u32);
-                            gl::DrawElements(gl::TRIANGLES, count as i32, idx_type,
-                                (cmd_params.idx_offset * mem::size_of::<DrawIdx>()) as *const _);
+                            gl::DrawElements(
+                                gl::TRIANGLES,
+                                count as i32,
+                                idx_type,
+                                (cmd_params.idx_offset * mem::size_of::<DrawIdx>()) as *const _,
+                            );
                         }
                     }
                     imgui::DrawCmd::ResetRenderState => {}
                     imgui::DrawCmd::RawCallback { callback, raw_cmd } => {
                         use imgui::internal::RawWrapper;
-                        unsafe { callback(draw_list.raw(), raw_cmd); }
+                        unsafe {
+                            callback(draw_list.raw(), raw_cmd);
+                        }
                     }
                 }
             }
@@ -135,8 +171,15 @@ impl GlResources {
             gl::Disable(gl::BLEND);
             gl::Enable(gl::CULL_FACE);
             gl::Enable(gl::DEPTH_TEST);
-            if prev_scissor_test == gl::FALSE { gl::Disable(gl::SCISSOR_TEST); }
-            gl::Scissor(prev_scissor[0], prev_scissor[1], prev_scissor[2], prev_scissor[3]);
+            if prev_scissor_test == gl::FALSE {
+                gl::Disable(gl::SCISSOR_TEST);
+            }
+            gl::Scissor(
+                prev_scissor[0],
+                prev_scissor[1],
+                prev_scissor[2],
+                prev_scissor[3],
+            );
         }
     }
 }
@@ -144,8 +187,8 @@ impl GlResources {
 // ─── ImguiGlRenderer ─────────────────────────────────────────────────────────
 
 pub struct ImguiGlRenderer {
-    gl:       GlResources,
-    imgui:    imgui::Context,
+    gl: GlResources,
+    imgui: imgui::Context,
     platform: imgui_winit_support::WinitPlatform,
 }
 
@@ -155,35 +198,40 @@ const DEFAULT_FRAG: &str = include_str!("../../../assets/shaders/imgui.frag.glsl
 impl ImguiGlRenderer {
     pub fn new(
         mut imgui: imgui::Context,
-        platform:  imgui_winit_support::WinitPlatform,
+        platform: imgui_winit_support::WinitPlatform,
     ) -> Result<Self, Box<dyn std::error::Error>> {
-        let frame = Rc::new(RefCell::new(FrameState { proj: Matrix4::from_scale(1.0) }));
+        let frame = Rc::new(RefCell::new(FrameState {
+            proj: Matrix4::from_scale(1.0),
+        }));
 
-        let mut shader = ShaderProgram::<NoopProcessable>::from_sources(DEFAULT_VERT, DEFAULT_FRAG)?;
+        let mut shader =
+            ShaderProgram::<NoopProcessable>::from_sources(DEFAULT_VERT, DEFAULT_FRAG)?;
         {
             let f = Rc::clone(&frame);
             shader.add_per_render_uniform(Box::new(UniformAdapter {
-                uniform:   UniformMatrix4::new("uProjMtx"),
+                uniform: UniformMatrix4::new("uProjMtx"),
                 extractor: Box::new(move |_: &RenderState<NoopProcessable>| f.borrow().proj),
             }));
         }
         shader.add_per_render_uniform(Box::new(UniformAdapter {
-            uniform:   UniformInt::new("uTexture"),
+            uniform: UniformInt::new("uTexture"),
             extractor: Box::new(|_: &RenderState<NoopProcessable>| 0i32),
         }));
 
         let stride = mem::size_of::<DrawVert>() as i32;
         let vao = Vao::create();
-        let vbo = Vbo::create(VboTarget::ArrayBuffer,        VboUsage::StreamDraw);
+        let vbo = Vbo::create(VboTarget::ArrayBuffer, VboUsage::StreamDraw);
         let ebo = Vbo::create(VboTarget::ElementArrayBuffer, VboUsage::StreamDraw);
-        vbo.bind(); ebo.bind();
+        vbo.bind();
+        ebo.bind();
         Attribute::of(0, 2, DataType::Float, false).link(stride, 0);
         Attribute::of(1, 2, DataType::Float, false).link(stride, 8);
-        Attribute::of(2, 4, DataType::UByte, true ).link(stride, 16);
+        Attribute::of(2, 4, DataType::UByte, true).link(stride, 16);
         Attribute::enable_index(0);
         Attribute::enable_index(1);
         Attribute::enable_index(2);
-        vao.unbind(); vbo.unbind();
+        vao.unbind();
+        vbo.unbind();
 
         let mut font_tex = SimpleTexture::create();
         font_tex.bind();
@@ -200,14 +248,21 @@ impl ImguiGlRenderer {
         font_tex.apply_configs(&configs);
         {
             let atlas = imgui.fonts();
-            let tex   = atlas.build_rgba32_texture();
+            let tex = atlas.build_rgba32_texture();
             font_tex.upload_rgba8(tex.width as i32, tex.height as i32, tex.data);
         }
         font_tex.unbind();
         imgui.fonts().tex_id = TextureId::new(font_tex.get_id() as usize);
 
         Ok(Self {
-            gl: GlResources { shader, frame, vao, vbo, ebo, font_tex },
+            gl: GlResources {
+                shader,
+                frame,
+                vao,
+                vbo,
+                ebo,
+                font_tex,
+            },
             imgui,
             platform,
         })
@@ -218,20 +273,24 @@ impl ImguiGlRenderer {
     pub fn prepare(
         &mut self,
         window: &Arc<Window>,
-        pw: f32, ph: f32, scale: f32,
+        pw: f32,
+        ph: f32,
+        scale: f32,
         sc: &mut SceneContext,
     ) {
         let lw = pw / scale;
         let lh = ph / scale;
-        self.imgui.io_mut().display_size              = [lw, lh];
+        self.imgui.io_mut().display_size = [lw, lh];
         self.imgui.io_mut().display_framebuffer_scale = [scale, scale];
-        self.platform.prepare_frame(self.imgui.io_mut(), window)
+        self.platform
+            .prepare_frame(self.imgui.io_mut(), window)
             .expect("imgui prepare_frame failed");
 
         let ui = self.imgui.frame();
 
         // Collect node handles first (drops scene borrow), then build each.
-        let nodes: Vec<_> = sc.scene()
+        let nodes: Vec<_> = sc
+            .scene()
             .map(|sg| sg.collect_nodes_of_type::<UiNode>())
             .unwrap_or_default();
         for node_rc in nodes {
@@ -248,15 +307,22 @@ impl ImguiGlRenderer {
 
     /// Forward a winit event into imgui.
     pub fn handle_event(&mut self, window: &Arc<Window>, event: &winit::event::Event<()>) {
-        self.platform.handle_event(self.imgui.io_mut(), window, event);
+        self.platform
+            .handle_event(self.imgui.io_mut(), window, event);
     }
 
-    pub fn wants_mouse(&self)    -> bool { self.imgui.io().want_capture_mouse }
-    pub fn wants_keyboard(&self) -> bool { self.imgui.io().want_capture_keyboard }
+    pub fn wants_mouse(&self) -> bool {
+        self.imgui.io().want_capture_mouse
+    }
+    pub fn wants_keyboard(&self) -> bool {
+        self.imgui.io().want_capture_keyboard
+    }
 }
 
 impl IRenderer for ImguiGlRenderer {
-    fn pass(&self) -> RenderPass { RenderPass::Overlay }
+    fn pass(&self) -> RenderPass {
+        RenderPass::Overlay
+    }
 
     /// Finalise the imgui frame (built in `prepare()`) and draw immediately.
     /// `&DrawData` is borrowed from `self.imgui` and passed to `self.gl.draw()`.

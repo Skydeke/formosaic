@@ -40,8 +40,8 @@ use std::rc::Rc;
 use rand::Rng;
 
 use crate::architecture::scene::node::node::{NodeBehavior, NodeChildren};
-use crate::architecture::scene::node::transform::Transform;
 use crate::architecture::scene::node::scenegraph::Scenegraph;
+use crate::architecture::scene::node::transform::Transform;
 use crate::architecture::scene::scene_context::SceneContext;
 
 /// Marker passed to action-enabled UI callbacks.
@@ -67,12 +67,12 @@ enum CallbackKind {
 
 /// A named, show/hide-able ImGui panel living in the scene graph.
 pub struct UiNode {
-    uuid:      u32,
-    name:      String,
-    hidden:    bool,
+    uuid: u32,
+    name: String,
+    hidden: bool,
     transform: Transform,
-    children:  Vec<Rc<RefCell<dyn NodeBehavior>>>,
-    callback:  CallbackKind,
+    children: Vec<Rc<RefCell<dyn NodeBehavior>>>,
+    callback: CallbackKind,
 }
 
 impl UiNode {
@@ -82,12 +82,12 @@ impl UiNode {
         F: FnMut(&imgui::Ui, f32, f32, &mut SceneContext) + 'static,
     {
         Self {
-            uuid:      rand::rng().random(),
-            name:      name.into(),
-            hidden:    false,
+            uuid: rand::rng().random(),
+            name: name.into(),
+            hidden: false,
             transform: Transform::new(),
-            children:  Vec::new(),
-            callback:  CallbackKind::Build(Box::new(callback)),
+            children: Vec::new(),
+            callback: CallbackKind::Build(Box::new(callback)),
         }
     }
 
@@ -96,12 +96,12 @@ impl UiNode {
         F: FnMut(&imgui::Ui, f32, f32, &mut SceneContext, &UiActionSink) + 'static,
     {
         Self {
-            uuid:      rand::rng().random(),
-            name:      name.into(),
-            hidden:    false,
+            uuid: rand::rng().random(),
+            name: name.into(),
+            hidden: false,
             transform: Transform::new(),
-            children:  Vec::new(),
-            callback:  CallbackKind::Action(Box::new(callback)),
+            children: Vec::new(),
+            callback: CallbackKind::Action(Box::new(callback)),
         }
     }
 
@@ -147,29 +147,48 @@ impl UiNode {
 // ─── NodeBehavior impl ────────────────────────────────────────────────────────
 
 impl NodeBehavior for UiNode {
-    fn get_uuid(&self)  -> u32   { self.uuid }
-    fn is_hidden(&self) -> bool  { self.hidden }
+    fn get_uuid(&self) -> u32 {
+        self.uuid
+    }
+    fn is_hidden(&self) -> bool {
+        self.hidden
+    }
 
-    fn set_hidden(&mut self, hidden: bool) { self.hidden = hidden; }
+    fn set_hidden(&mut self, hidden: bool) {
+        self.hidden = hidden;
+    }
 
-    fn get_name(&self) -> String { self.name.clone() }
+    fn get_name(&self) -> String {
+        self.name.clone()
+    }
 
-    fn transform(&self)     -> &Transform     { &self.transform }
-    fn transform_mut(&mut self) -> &mut Transform { &mut self.transform }
+    fn transform(&self) -> &Transform {
+        &self.transform
+    }
+    fn transform_mut(&mut self) -> &mut Transform {
+        &mut self.transform
+    }
 
-    fn as_any(&self) -> &dyn Any { self }
+    fn as_any(&self) -> &dyn Any {
+        self
+    }
 
     /// Needed for downcasting inside `collect_and_build`.
-    fn as_any_mut(&mut self) -> &mut dyn Any { self }
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
 }
 
 impl NodeChildren for UiNode {
     fn add_child_impl(
         &mut self,
         parent: Rc<RefCell<dyn NodeBehavior>>,
-        child:  Rc<RefCell<dyn NodeBehavior>>,
+        child: Rc<RefCell<dyn NodeBehavior>>,
     ) {
-        child.borrow_mut().transform_mut().set_parent(Some(Rc::downgrade(&parent)));
+        child
+            .borrow_mut()
+            .transform_mut()
+            .set_parent(Some(Rc::downgrade(&parent)));
         self.children.push(child);
     }
 

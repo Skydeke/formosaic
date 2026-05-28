@@ -1,9 +1,9 @@
-pub mod util;
-pub mod state_machine;
-pub mod hud;
-pub mod hint_warmth;
-pub mod menu;
 pub mod credits;
+pub mod hint_warmth;
+pub mod hud;
 pub mod loading;
+pub mod menu;
+pub mod state_machine;
 #[cfg(target_os = "android")]
 pub mod touch_buttons;
+pub mod util;

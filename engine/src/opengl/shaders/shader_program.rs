@@ -1,5 +1,5 @@
-use crate::rendering::abstracted::processable::Processable;
 use crate::opengl::shaders::{shader::Shader, uniform::Uniform, RenderState};
+use crate::rendering::abstracted::processable::Processable;
 use std::ffi::CString;
 use std::ptr;
 

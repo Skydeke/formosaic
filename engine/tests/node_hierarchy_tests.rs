@@ -1,4 +1,3 @@
-use formosaic_engine::architecture::models::simple_model::PuzzleParams;
 use formosaic_engine::architecture::scene::node::node::{Node, NodeBehavior, NodeChildren};
 use formosaic_engine::architecture::scene::node::scenegraph::Scenegraph;
 use std::any::Any;
@@ -86,9 +85,12 @@ fn deep_hierarchy_collect_all() {
     let l2: Rc<RefCell<dyn NodeBehavior>> = Rc::new(RefCell::new(Node::new()));
     let l3: Rc<RefCell<dyn NodeBehavior>> = Rc::new(RefCell::new(Node::new()));
 
-    l2.borrow_mut().add_child_impl(Rc::clone(&l2), Rc::clone(&l3));
-    l1.borrow_mut().add_child_impl(Rc::clone(&l1), Rc::clone(&l2));
-    root.borrow_mut().add_child_impl(Rc::clone(&root), Rc::clone(&l1));
+    l2.borrow_mut()
+        .add_child_impl(Rc::clone(&l2), Rc::clone(&l3));
+    l1.borrow_mut()
+        .add_child_impl(Rc::clone(&l1), Rc::clone(&l2));
+    root.borrow_mut()
+        .add_child_impl(Rc::clone(&root), Rc::clone(&l1));
 
     let all = Node::collect_all(&root);
     assert_eq!(all.len(), 4);
@@ -242,21 +244,4 @@ fn node_default_impl() {
     let node = Node::default();
     assert!(node.get_name().starts_with("Node#"));
     assert!(!node.is_hidden());
-}
-
-#[test]
-fn puzzle_params_default_for() {
-    let params = PuzzleParams::default_for(1.0);
-    assert!((params.entity_scale - 0.005).abs() < 1e-6);
-    assert!((params.orbit_distance - 3.0).abs() < 1e-6);
-    assert!((params.min_disp - 3.0).abs() < 1e-6);
-    assert!((params.max_disp - 15.0).abs() < 1e-6);
-    assert!((params.model_space_radius - 1.0).abs() < 1e-6);
-}
-
-#[test]
-fn puzzle_params_clone_copy() {
-    let params = PuzzleParams::default_for(2.0);
-    let params2 = params;
-    assert_eq!(params.entity_scale, params2.entity_scale);
 }

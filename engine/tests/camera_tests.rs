@@ -43,7 +43,10 @@ fn camera_projection_matrix_is_identity_by_default() {
     cam.set_resolution(Vector2::new(1, 1));
     cam.update_projection_matrix();
     let proj = cam.get_projection_matrix();
-    assert!(proj.x.x > 0.0, "perspective projection should have valid x component");
+    assert!(
+        proj.x.x > 0.0,
+        "perspective projection should have valid x component"
+    );
 }
 
 #[test]
@@ -70,7 +73,10 @@ fn camera_resolution_change_affects_perspective() {
     cam.update_projection_matrix();
     let tall = *cam.get_projection_matrix();
 
-    assert_ne!(wide.x.x, tall.x.x, "aspect ratio changes should affect projection x");
+    assert_ne!(
+        wide.x.x, tall.x.x,
+        "aspect ratio changes should affect projection x"
+    );
 }
 
 #[test]
@@ -94,7 +100,10 @@ fn camera_orthographic_projection_matrix_is_symmetric() {
     let up_col = mat.z;
     let _back_col = mat.w;
 
-    assert!((left_col.x - right_col.y).abs() < 1e-5, "ortho x and y should match for symmetric bounds");
+    assert!(
+        (left_col.x - right_col.y).abs() < 1e-5,
+        "ortho x and y should match for symmetric bounds"
+    );
 }
 
 #[test]
@@ -110,7 +119,10 @@ fn camera_perspective_projection_has_fov_impact() {
     cam.update_projection_matrix();
     let wide = *cam.get_projection_matrix();
 
-    assert_ne!(narrow.x.x, wide.x.x, "different FOV should produce different projection");
+    assert_ne!(
+        narrow.x.x, wide.x.x,
+        "different FOV should produce different projection"
+    );
 }
 
 #[test]
@@ -128,7 +140,10 @@ fn camera_perspective_near_far_affect_projection() {
     cam.update_projection_matrix();
     let proj2 = *cam.get_projection_matrix();
 
-    assert_ne!(proj1, proj2, "near/far changes should affect projection matrix");
+    assert_ne!(
+        proj1, proj2,
+        "near/far changes should affect projection matrix"
+    );
 }
 
 #[test]
@@ -148,7 +163,10 @@ fn camera_view_matrix_changes_when_position_changes() {
     cam.update_view_matrix();
     let view2 = *cam.get_view_matrix();
 
-    assert_ne!(view1, view2, "camera position change should affect view matrix");
+    assert_ne!(
+        view1, view2,
+        "camera position change should affect view matrix"
+    );
 }
 
 #[test]
@@ -172,7 +190,10 @@ fn camera_orthographic_projection_matrix_independent_of_fov() {
     let mut ortho = OrthographicProjection::new(-2.0, 2.0, -2.0, 2.0, 0.1, 100.0);
     let mat1 = ortho.get_projection_matrix((800, 600), 30.0, 0.1, 100.0);
     let mat2 = ortho.get_projection_matrix((800, 600), 120.0, 0.1, 100.0);
-    assert_eq!(mat1, mat2, "orthographic projection should not depend on FOV");
+    assert_eq!(
+        mat1, mat2,
+        "orthographic projection should not depend on FOV"
+    );
 }
 
 #[test]
@@ -205,5 +226,8 @@ fn camera_projection_view_matrix_reflects_view_changes() {
     cam.update_projection_view_matrix();
 
     let pv2 = *cam.get_projection_view_matrix();
-    assert_ne!(pv1, pv2, "view change should propagate to projection-view matrix");
+    assert_ne!(
+        pv1, pv2,
+        "view change should propagate to projection-view matrix"
+    );
 }

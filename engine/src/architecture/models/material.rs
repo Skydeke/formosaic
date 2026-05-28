@@ -8,12 +8,14 @@ use crate::opengl::textures::texture::Texture;
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum AlphaMode {
     Opaque,
-    Mask(f32),  // alpha cutoff
+    Mask(f32), // alpha cutoff
     Blend,
 }
 
 impl Default for AlphaMode {
-    fn default() -> Self { AlphaMode::Opaque }
+    fn default() -> Self {
+        AlphaMode::Opaque
+    }
 }
 
 /// Full PBR + legacy material properties loaded from assimp.
@@ -26,34 +28,34 @@ pub struct Material {
     pub name: Option<String>,
 
     // ── Colour scalars ─────────────────────────────────────────────────────
-    pub diffuse_color:     Vector4<f32>,
-    pub specular_color:    Vector4<f32>,
-    pub ambient_color:     Vector4<f32>,
-    pub emissive_color:    Vector4<f32>,
+    pub diffuse_color: Vector4<f32>,
+    pub specular_color: Vector4<f32>,
+    pub ambient_color: Vector4<f32>,
+    pub emissive_color: Vector4<f32>,
     pub transparent_color: Vector4<f32>,
 
     /// PBR metallic factor (0 = dielectric, 1 = metal).
-    pub metallic_factor:   f32,
+    pub metallic_factor: f32,
     /// PBR roughness factor.
-    pub roughness_factor:  f32,
+    pub roughness_factor: f32,
 
     // ── Texture maps ───────────────────────────────────────────────────────
     /// Albedo / base-color texture.
-    pub diffuse_texture:           Option<Rc<dyn Texture>>,
+    pub diffuse_texture: Option<Rc<dyn Texture>>,
     /// Tangent-space normal map.
-    pub normal_texture:            Option<Rc<dyn Texture>>,
+    pub normal_texture: Option<Rc<dyn Texture>>,
     /// glTF ORM: R=occlusion, G=roughness, B=metallic (combined in one tex).
     pub metallic_roughness_texture: Option<Rc<dyn Texture>>,
     /// Emissive glow texture.
-    pub emissive_texture:          Option<Rc<dyn Texture>>,
+    pub emissive_texture: Option<Rc<dyn Texture>>,
     /// Separate ambient-occlusion texture (when not packed into ORM).
-    pub occlusion_texture:         Option<Rc<dyn Texture>>,
+    pub occlusion_texture: Option<Rc<dyn Texture>>,
     /// Specular/shininess texture (legacy Phong pipelines).
-    pub specular_texture:          Option<Rc<dyn Texture>>,
+    pub specular_texture: Option<Rc<dyn Texture>>,
 
     // ── Render state ───────────────────────────────────────────────────────
     pub cull_backface: bool,
-    pub alpha_mode:    AlphaMode,
+    pub alpha_mode: AlphaMode,
     /// Emissive strength multiplier (KHR_materials_emissive_strength).
     pub emissive_strength: f32,
 }
@@ -62,59 +64,70 @@ impl Default for Material {
     fn default() -> Self {
         Self {
             name: None,
-            diffuse_color:     Vector4::new(1.0, 1.0, 1.0, 1.0),
-            specular_color:    Vector4::new(1.0, 1.0, 1.0, 1.0),
-            ambient_color:     Vector4::new(0.0, 0.0, 0.0, 1.0),
-            emissive_color:    Vector4::new(0.0, 0.0, 0.0, 1.0),
+            diffuse_color: Vector4::new(1.0, 1.0, 1.0, 1.0),
+            specular_color: Vector4::new(1.0, 1.0, 1.0, 1.0),
+            ambient_color: Vector4::new(0.0, 0.0, 0.0, 1.0),
+            emissive_color: Vector4::new(0.0, 0.0, 0.0, 1.0),
             transparent_color: Vector4::new(0.0, 0.0, 0.0, 0.0),
-            metallic_factor:   0.0,
-            roughness_factor:  0.5,
+            metallic_factor: 0.0,
+            roughness_factor: 0.5,
 
-            diffuse_texture:            None,
-            normal_texture:             None,
+            diffuse_texture: None,
+            normal_texture: None,
             metallic_roughness_texture: None,
-            emissive_texture:           None,
-            occlusion_texture:          None,
-            specular_texture:           None,
+            emissive_texture: None,
+            occlusion_texture: None,
+            specular_texture: None,
 
-            cull_backface:    true,
-            alpha_mode:       AlphaMode::Opaque,
+            cull_backface: true,
+            alpha_mode: AlphaMode::Opaque,
             emissive_strength: 1.0,
         }
     }
 }
 
 impl Material {
-    pub fn new() -> Self { Self::default() }
+    pub fn new() -> Self {
+        Self::default()
+    }
 
     // ── Builder helpers ────────────────────────────────────────────────────
 
     pub fn with_diffuse_color(mut self, color: Vector4<f32>) -> Self {
-        self.diffuse_color = color; self
+        self.diffuse_color = color;
+        self
     }
     pub fn with_specular_color(mut self, color: Vector4<f32>) -> Self {
-        self.specular_color = color; self
+        self.specular_color = color;
+        self
     }
     pub fn with_ambient_color(mut self, color: Vector4<f32>) -> Self {
-        self.ambient_color = color; self
+        self.ambient_color = color;
+        self
     }
     pub fn with_emissive_color(mut self, color: Vector4<f32>) -> Self {
-        self.emissive_color = color; self
+        self.emissive_color = color;
+        self
     }
     pub fn with_transparent_color(mut self, color: Vector4<f32>) -> Self {
-        self.transparent_color = color; self
+        self.transparent_color = color;
+        self
     }
     pub fn with_diffuse_texture(mut self, texture: Rc<dyn Texture>) -> Self {
-        self.diffuse_texture = Some(texture); self
+        self.diffuse_texture = Some(texture);
+        self
     }
     pub fn with_normal_texture(mut self, texture: Rc<dyn Texture>) -> Self {
-        self.normal_texture = Some(texture); self
+        self.normal_texture = Some(texture);
+        self
     }
     pub fn enable_backface_culling(mut self) -> Self {
-        self.cull_backface = true; self
+        self.cull_backface = true;
+        self
     }
     pub fn disable_backface_culling(mut self) -> Self {
-        self.cull_backface = false; self
+        self.cull_backface = false;
+        self
     }
 
     /// Convenience: does this material have any emissive contribution?
@@ -129,7 +142,7 @@ impl Material {
     pub fn preconfigure(&self) {
         unsafe {
             gl::Enable(gl::DEPTH_TEST);
-            
+
             if self.cull_backface {
                 gl::Enable(gl::CULL_FACE);
             } else {

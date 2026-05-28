@@ -30,18 +30,21 @@ fn main() {
     let api_key = std::env::var("POLY_PIZZA_API_KEY").unwrap_or_else(|_| {
         // Walk up from CARGO_MANIFEST_DIR to find a .env file.
         // Handles both `cargo build` from game/ and from workspace root.
-        let manifest = std::path::PathBuf::from(
-            std::env::var("CARGO_MANIFEST_DIR").unwrap()
-        );
+        let manifest = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").unwrap());
         let candidates = [
             manifest.join(".env"),
-            manifest.parent().map(|p| p.join(".env")).unwrap_or_default(),
+            manifest
+                .parent()
+                .map(|p| p.join(".env"))
+                .unwrap_or_default(),
         ];
         for path in &candidates {
             if let Ok(contents) = std::fs::read_to_string(path) {
                 for line in contents.lines() {
                     let line = line.trim();
-                    if line.starts_with('#') || line.is_empty() { continue; }
+                    if line.starts_with('#') || line.is_empty() {
+                        continue;
+                    }
                     if let Some(val) = line.strip_prefix("POLY_PIZZA_API_KEY=") {
                         return val.trim_matches('"').trim_matches('\'').to_string();
                     }

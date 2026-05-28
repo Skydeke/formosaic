@@ -1,3 +1,18 @@
+//! Vertex Array Object wrapper.
+//!
+//! # Safety invariants
+//!
+//! - `id` is always a valid VAO name from `gl::GenVertexArrays`, or zero
+//!   (unbound state).  Only non-zero names are bound or deleted.
+//! - Data buffers are held via `Rc<dyn IVbo>`, ensuring the underlying VBO
+//!   stays alive while the VAO references it.
+//! - Attribute configuration is done once at construction via
+//!   `gl::VertexAttribPointer` / `gl::EnableVertexAttribArray` and stays
+//!   baked into the VAO state.
+//! - `delete()` is idempotent (guarded by `deleted` flag).
+//! - The destructor does **not** call `gl::DeleteVertexArrays`; the caller
+//!   must call `delete()` while the GL context is current.
+
 use gl::types::*;
 use std::cell::Cell;
 use std::rc::Rc;

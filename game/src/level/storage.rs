@@ -72,18 +72,18 @@ impl LevelMeta {
     pub fn to_json(&self) -> String {
         let best = match self.best_time_secs {
             Some(t) => format!("{:.2}", t),
-            None    => "null".to_string(),
+            None => "null".to_string(),
         };
         format!(
             r#"{{"id":"{id}","name":"{name}","author":"{author}","license":"{lic}","source_url":"{url}","model_file":"{mf}","best_time_secs":{best},"play_count":{pc},"difficulty":{diff:.4}}}"#,
-            id   = self.id,
+            id = self.id,
             name = self.name,
             author = self.author,
-            lic  = self.license,
-            url  = self.source_url,
-            mf   = self.model_file,
+            lic = self.license,
+            url = self.source_url,
+            mf = self.model_file,
             best = best,
-            pc   = self.play_count,
+            pc = self.play_count,
             diff = self.difficulty,
         )
     }
@@ -92,15 +92,17 @@ impl LevelMeta {
     pub fn from_json(s: &str) -> Option<Self> {
         fn extract<'a>(json: &'a str, key: &str) -> Option<&'a str> {
             let needle = format!("\"{}\":\"", key);
-            let start  = json.find(needle.as_str())? + needle.len();
-            let end    = json[start..].find('"')? + start;
+            let start = json.find(needle.as_str())? + needle.len();
+            let end = json[start..].find('"')? + start;
             Some(&json[start..end])
         }
         fn extract_num(json: &str, key: &str) -> Option<f32> {
             let needle = format!("\"{}\":", key);
-            let start  = json.find(needle.as_str())? + needle.len();
-            let rest   = &json[start..];
-            let end    = rest.find(|c: char| !c.is_ascii_digit() && c != '.' && c != '-').unwrap_or(rest.len());
+            let start = json.find(needle.as_str())? + needle.len();
+            let rest = &json[start..];
+            let end = rest
+                .find(|c: char| !c.is_ascii_digit() && c != '.' && c != '-')
+                .unwrap_or(rest.len());
             rest[..end].parse().ok()
         }
 
@@ -111,7 +113,9 @@ impl LevelMeta {
                 if rest.trim_start().starts_with("null") {
                     None
                 } else {
-                    let end = rest.find(|c: char| !c.is_ascii_digit() && c != '.').unwrap_or(rest.len());
+                    let end = rest
+                        .find(|c: char| !c.is_ascii_digit() && c != '.')
+                        .unwrap_or(rest.len());
                     rest[..end].trim().parse::<f32>().ok()
                 }
             } else {
@@ -120,15 +124,15 @@ impl LevelMeta {
         };
 
         Some(LevelMeta {
-            id:          extract(s, "id")?.to_string(),
-            name:        extract(s, "name")?.to_string(),
-            author:      extract(s, "author")?.to_string(),
-            license:     extract(s, "license")?.to_string(),
-            source_url:  extract(s, "source_url")?.to_string(),
-            model_file:  extract(s, "model_file")?.to_string(),
+            id: extract(s, "id")?.to_string(),
+            name: extract(s, "name")?.to_string(),
+            author: extract(s, "author")?.to_string(),
+            license: extract(s, "license")?.to_string(),
+            source_url: extract(s, "source_url")?.to_string(),
+            model_file: extract(s, "model_file")?.to_string(),
             best_time_secs,
-            play_count:  extract_num(s, "play_count").unwrap_or(0.0) as u32,
-            difficulty:  extract_num(s, "difficulty").unwrap_or(0.5),
+            play_count: extract_num(s, "play_count").unwrap_or(0.0) as u32,
+            difficulty: extract_num(s, "difficulty").unwrap_or(0.5),
         })
     }
 }
@@ -161,7 +165,10 @@ impl LevelRegistry {
         // Sort by difficulty ascending so easy levels come first.
         levels.sort_by(|a, b| a.difficulty.partial_cmp(&b.difficulty).unwrap());
 
-        Self { levels, base_dir: base_dir.to_path_buf() }
+        Self {
+            levels,
+            base_dir: base_dir.to_path_buf(),
+        }
     }
 
     /// Path to the model file for a level.
@@ -202,19 +209,21 @@ impl LevelRegistry {
             meta.play_count += 1;
             meta.best_time_secs = Some(match meta.best_time_secs {
                 Some(prev) => prev.min(time_secs),
-                None       => time_secs,
+                None => time_secs,
             });
             // Persist update.
-            let dir  = self.base_dir.join("levels").join(&meta.id);
+            let dir = self.base_dir.join("levels").join(&meta.id);
             let path = dir.join("meta.json");
-            let _    = std::fs::write(path, meta.to_json());
+            let _ = std::fs::write(path, meta.to_json());
         }
     }
 
     /// Returns a random level meta (for the "Random Level" button).
     pub fn random_level(&self) -> Option<&LevelMeta> {
         use rand::Rng;
-        if self.levels.is_empty() { return None; }
+        if self.levels.is_empty() {
+            return None;
+        }
         let idx = rand::rng().random_range(0..self.levels.len());
         Some(&self.levels[idx])
     }
@@ -241,7 +250,9 @@ fn dirs_or_home() -> PathBuf {
     }
     if let Some(home) = std::env::var("HOME").ok() {
         let xdg = PathBuf::from(&home).join(".local").join("share");
-        if xdg.exists() { return xdg; }
+        if xdg.exists() {
+            return xdg;
+        }
         return PathBuf::from(home);
     }
     PathBuf::from(".")

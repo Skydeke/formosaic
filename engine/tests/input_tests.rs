@@ -2,7 +2,16 @@ use formosaic_engine::input::{Event, Key};
 
 #[test]
 fn key_enum_variants_exist() {
-    let keys = [Key::Escape, Key::H, Key::R, Key::N, Key::K, Key::L, Key::Space, Key::Other];
+    let keys = [
+        Key::Escape,
+        Key::H,
+        Key::R,
+        Key::N,
+        Key::K,
+        Key::L,
+        Key::Space,
+        Key::Other,
+    ];
     for key in keys {
         let _ = format!("{:?}", key);
     }
@@ -17,7 +26,12 @@ fn event_mouse_down_contains_fields() {
         height: 600.0,
     };
     match ev {
-        Event::MouseDown { x, y, width, height } => {
+        Event::MouseDown {
+            x,
+            y,
+            width,
+            height,
+        } => {
             assert_eq!(x, 100.0);
             assert_eq!(y, 200.0);
             assert_eq!(width, 800.0);
@@ -36,7 +50,12 @@ fn event_mouse_up_contains_fields() {
         height: 600.0,
     };
     match ev {
-        Event::MouseUp { x, y: _, width: _, height: _ } => {
+        Event::MouseUp {
+            x,
+            y: _,
+            width: _,
+            height: _,
+        } => {
             assert_eq!(x, 100.0);
         }
         _ => panic!("expected MouseUp"),
@@ -52,7 +71,12 @@ fn event_mouse_move_contains_fields() {
         height: 600.0,
     };
     match ev {
-        Event::MouseMove { x, y: _, width: _, height: _ } => {
+        Event::MouseMove {
+            x,
+            y: _,
+            width: _,
+            height: _,
+        } => {
             assert_eq!(x, 150.0);
         }
         _ => panic!("expected MouseMove"),
@@ -69,7 +93,13 @@ fn event_touch_down_contains_id() {
         height: 600.0,
     };
     match ev {
-        Event::TouchDown { id, x, y: _, width: _, height: _ } => {
+        Event::TouchDown {
+            id,
+            x,
+            y: _,
+            width: _,
+            height: _,
+        } => {
             assert_eq!(id, 42);
             assert_eq!(x, 300.0);
         }

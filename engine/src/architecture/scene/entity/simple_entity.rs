@@ -34,11 +34,13 @@ impl SimpleEntity {
     }
 
     pub fn centroid(&self) -> Vector3<f32> {
-        let centroid = self.model.borrow().centroid().unwrap();
-        let centroid4 = Vector4::new(centroid.x, centroid.y, centroid.z, 1.0);
-        let world_centroid4 = self.transform.get_matrix() * centroid4;
-        let world_centroid = world_centroid4.truncate();
-        world_centroid
+        let model = self.model.borrow();
+        let center = model
+            .visual_center()
+            .or_else(|| model.centroid())
+            .unwrap_or(Vector3::new(0.0, 0.0, 0.0));
+        let center4 = Vector4::new(center.x, center.y, center.z, 1.0);
+        (self.transform.get_matrix() * center4).truncate()
     }
 }
 
@@ -108,14 +110,8 @@ impl NodeChildren for SimpleEntity {
     }
 }
 
-// Implement Processable trait
 impl Processable for SimpleEntity {
     fn process(&mut self) {}
-
-    fn get_model(&self) -> &impl Model {
-        unsafe { &*(self.model.as_ref().as_ptr()) }
-        // TODO: ⚠️ This is unsafe and not recommended!
-    }
 }
 
 // Implement SceneObject trait

@@ -67,11 +67,21 @@ pub fn lerp_scaling(a: &ScalingKey, b: &ScalingKey, t: f64) -> Vector3<f32> {
 /// Returns `(prev_key, next_key, t)` where `t` is the interpolation factor.
 /// If `keys` has 0 elements, returns `None`.
 /// If `keys` has 1 element, returns `(key, key, 0.0)`.
-fn find_keyframe_interval<T>(keys: &[T], time: f64, extract_time: impl Fn(&T) -> f64) -> Option<(usize, usize, f64)> {
+fn find_keyframe_interval<T>(
+    keys: &[T],
+    time: f64,
+    extract_time: impl Fn(&T) -> f64,
+) -> Option<(usize, usize, f64)> {
     if keys.is_empty() {
         return None;
     }
     if keys.len() == 1 {
+        return Some((0, 0, 0.0));
+    }
+
+    // Before the first keyframe — hold at first key
+    let first_time = extract_time(&keys[0]);
+    if time <= first_time {
         return Some((0, 0, 0.0));
     }
 
@@ -91,7 +101,10 @@ fn find_keyframe_interval<T>(keys: &[T], time: f64, extract_time: impl Fn(&T) ->
 }
 
 /// Evaluate a BoneChannel at a given time (in ticks), producing a position, rotation, and scale.
-pub fn evaluate_channel(channel: &BoneChannel, time_ticks: f64) -> Option<(Vector3<f32>, Quaternion<f32>, Vector3<f32>)> {
+pub fn evaluate_channel(
+    channel: &BoneChannel,
+    time_ticks: f64,
+) -> Option<(Vector3<f32>, Quaternion<f32>, Vector3<f32>)> {
     let pos = find_keyframe_interval(&channel.position_keys, time_ticks, |k| k.time)
         .map(|(i, j, t)| lerp_position(&channel.position_keys[i], &channel.position_keys[j], t));
 
@@ -120,13 +133,10 @@ pub fn evaluate_clip(
 
     assert_eq!(bone_names.len(), bind_local_transforms.len());
     let mut result = bind_local_transforms.to_vec();
-    let mut matched = 0usize;
-
     for channel in &clip.channels {
         if let Some(bone_idx) = bone_names.iter().position(|n| n == &channel.bone_name) {
             if let Some((pos, rot, scl)) = evaluate_channel(channel, time_ticks) {
                 result[bone_idx] = Skeleton::make_local_transform(pos, rot, scl);
-                matched += 1;
             }
         }
     }

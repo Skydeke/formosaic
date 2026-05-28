@@ -5,20 +5,31 @@
 //! level cards) is handled by imgui on top.
 //!
 
+use cgmath::Vector2;
 use formosaic_engine::{
     architecture::scene::scene_context::SceneContext,
-    rendering::abstracted::{irenderer::{IRenderer, RenderPass}, processable::NoopProcessable},
     opengl::{
         constants::{data_type::DataType, vbo_target::VboTarget, vbo_usage::VboUsage},
         objects::{attribute::Attribute, vao::Vao, vbo::Vbo},
-        shaders::{uniform::{UniformAdapter, UniformVec2}, RenderState, ShaderProgram},
+        shaders::{
+            uniform::{UniformAdapter, UniformVec2},
+            RenderState, ShaderProgram,
+        },
+    },
+    rendering::abstracted::{
+        irenderer::{IRenderer, RenderPass},
+        processable::NoopProcessable,
     },
 };
-use cgmath::Vector2;
 use std::{cell::RefCell, rc::Rc};
 
 // ─── Wire-mesh particle ───────────────────────────────────────────────────────
-struct Particle { x: f32, y: f32, vx: f32, vy: f32 }
+struct Particle {
+    x: f32,
+    y: f32,
+    vx: f32,
+    vy: f32,
+}
 
 // ─── Vertex batch ─────────────────────────────────────────────────────────────
 // Each vertex: (x, y, r, g, b, a) — 6 floats.
@@ -26,13 +37,21 @@ const FLOATS_PER_VERT: usize = 6;
 const MAX_VERTS: usize = 65536;
 
 struct Batch {
-    tris:  Vec<f32>,
+    tris: Vec<f32>,
     lines: Vec<f32>,
 }
 
 impl Batch {
-    fn new() -> Self { Self { tris: Vec::new(), lines: Vec::new() } }
-    fn clear(&mut self) { self.tris.clear(); self.lines.clear(); }
+    fn new() -> Self {
+        Self {
+            tris: Vec::new(),
+            lines: Vec::new(),
+        }
+    }
+    fn clear(&mut self) {
+        self.tris.clear();
+        self.lines.clear();
+    }
 
     fn push_vert(buf: &mut Vec<f32>, x: f32, y: f32, c: [f32; 4]) {
         buf.extend_from_slice(&[x, y, c[0], c[1], c[2], c[3]]);
@@ -40,12 +59,12 @@ impl Batch {
 
     fn fill_rect(&mut self, x: f32, y: f32, w: f32, h: f32, c: [f32; 4]) {
         let (x2, y2) = (x + w, y + h);
-        Self::push_vert(&mut self.tris, x,  y,  c);
-        Self::push_vert(&mut self.tris, x2, y,  c);
+        Self::push_vert(&mut self.tris, x, y, c);
+        Self::push_vert(&mut self.tris, x2, y, c);
         Self::push_vert(&mut self.tris, x2, y2, c);
-        Self::push_vert(&mut self.tris, x,  y,  c);
+        Self::push_vert(&mut self.tris, x, y, c);
         Self::push_vert(&mut self.tris, x2, y2, c);
-        Self::push_vert(&mut self.tris, x,  y2, c);
+        Self::push_vert(&mut self.tris, x, y2, c);
     }
 
     fn line(&mut self, x1: f32, y1: f32, x2: f32, y2: f32, c: [f32; 4]) {
@@ -55,14 +74,16 @@ impl Batch {
 }
 
 // ─── Renderer ─────────────────────────────────────────────────────────────────
-struct FrameState { res: Vector2<f32> }
+struct FrameState {
+    res: Vector2<f32>,
+}
 
 pub struct MenuRenderer {
-    shader:    ShaderProgram<NoopProcessable>,
-    frame:     Rc<RefCell<FrameState>>,
-    vao:       Vao,
-    vbo:       Vbo,
-    batch:     Batch,
+    shader: ShaderProgram<NoopProcessable>,
+    frame: Rc<RefCell<FrameState>>,
+    vao: Vao,
+    vbo: Vbo,
+    batch: Batch,
     particles: Vec<Particle>,
 }
 
@@ -74,8 +95,13 @@ impl MenuRenderer {
         Self::with_shaders(DEFAULT_VERT, DEFAULT_FRAG)
     }
 
-    pub fn with_shaders(vert_src: &str, frag_src: &str) -> Result<Self, Box<dyn std::error::Error>> {
-        let frame = Rc::new(RefCell::new(FrameState { res: Vector2::new(1.0, 1.0) }));
+    pub fn with_shaders(
+        vert_src: &str,
+        frag_src: &str,
+    ) -> Result<Self, Box<dyn std::error::Error>> {
+        let frame = Rc::new(RefCell::new(FrameState {
+            res: Vector2::new(1.0, 1.0),
+        }));
         let mut shader = ShaderProgram::<NoopProcessable>::from_sources(vert_src, frag_src)?;
         {
             let f = Rc::clone(&frame);
@@ -103,8 +129,10 @@ impl MenuRenderer {
         vbo.unbind();
 
         Ok(Self {
-            shader, frame,
-            vao, vbo,
+            shader,
+            frame,
+            vao,
+            vbo,
             batch: Batch::new(),
             particles: Vec::new(),
         })
@@ -120,35 +148,51 @@ impl MenuRenderer {
             use rand::Rng;
             let mut rng = rand::rng();
             // Velocity in pixels/second — looks good at ~30–40 px/s.
-            self.particles = (0..target).map(|_| Particle {
-                x:  rng.random_range(0.0..w),
-                y:  rng.random_range(0.0..h),
-                vx: rng.random_range(-40.0_f32..40.0),
-                vy: rng.random_range(-40.0_f32..40.0),
-            }).collect();
+            self.particles = (0..target)
+                .map(|_| Particle {
+                    x: rng.random_range(0.0..w),
+                    y: rng.random_range(0.0..h),
+                    vx: rng.random_range(-40.0_f32..40.0),
+                    vy: rng.random_range(-40.0_f32..40.0),
+                })
+                .collect();
         }
         for p in &mut self.particles {
             p.x += p.vx * dt;
             p.y += p.vy * dt;
-            if p.x < 0.0 || p.x > w { p.vx = -p.vx; p.x = p.x.clamp(0.0, w); }
-            if p.y < 0.0 || p.y > h { p.vy = -p.vy; p.y = p.y.clamp(0.0, h); }
+            if p.x < 0.0 || p.x > w {
+                p.vx = -p.vx;
+                p.x = p.x.clamp(0.0, w);
+            }
+            if p.y < 0.0 || p.y > h {
+                p.vy = -p.vy;
+                p.y = p.y.clamp(0.0, h);
+            }
         }
     }
 
     // ── Flush helpers ─────────────────────────────────────────────────────
     fn flush_tris(&mut self) {
-        if self.batch.tris.is_empty() { return; }
+        if self.batch.tris.is_empty() {
+            return;
+        }
         let count = (self.batch.tris.len() / FLOATS_PER_VERT) as i32;
         self.vbo.store_float(0, &self.batch.tris);
-        unsafe { gl::DrawArrays(gl::TRIANGLES, 0, count); }
+        unsafe {
+            gl::DrawArrays(gl::TRIANGLES, 0, count);
+        }
         self.batch.tris.clear();
     }
 
     fn flush_lines(&mut self) {
-        if self.batch.lines.is_empty() { return; }
+        if self.batch.lines.is_empty() {
+            return;
+        }
         let count = (self.batch.lines.len() / FLOATS_PER_VERT) as i32;
         self.vbo.store_float(0, &self.batch.lines);
-        unsafe { gl::DrawArrays(gl::LINES, 0, count); }
+        unsafe {
+            gl::DrawArrays(gl::LINES, 0, count);
+        }
         self.batch.lines.clear();
     }
 
@@ -160,23 +204,28 @@ impl MenuRenderer {
             for j in (i + 1)..n {
                 let dx = self.particles[i].x - self.particles[j].x;
                 let dy = self.particles[i].y - self.particles[j].y;
-                if dx*dx + dy*dy < max_d2 {
+                if dx * dx + dy * dy < max_d2 {
                     let col = match (i + j) % 5 {
-                        0|1 => [0.75f32, 0.19, 0.29, 0.28],
-                        2|3 => [0.19, 0.31, 0.75, 0.24],
-                        _   => [0.12, 0.13, 0.21, 0.40],
+                        0 | 1 => [0.75f32, 0.19, 0.29, 0.28],
+                        2 | 3 => [0.19, 0.31, 0.75, 0.24],
+                        _ => [0.12, 0.13, 0.21, 0.40],
                     };
                     self.batch.line(
-                        self.particles[i].x, self.particles[i].y,
-                        self.particles[j].x, self.particles[j].y,
+                        self.particles[i].x,
+                        self.particles[i].y,
+                        self.particles[j].x,
+                        self.particles[j].y,
                         col,
                     );
                 }
             }
             // Node dot
             self.batch.fill_rect(
-                self.particles[i].x - 1.5, self.particles[i].y - 1.5,
-                3.0, 3.0, [0.78, 0.82, 0.94, 0.45],
+                self.particles[i].x - 1.5,
+                self.particles[i].y - 1.5,
+                3.0,
+                3.0,
+                [0.78, 0.82, 0.94, 0.45],
             );
         }
     }
@@ -231,15 +280,17 @@ impl MenuRenderer {
 }
 
 impl IRenderer for MenuRenderer {
-    fn pass(&self) -> RenderPass { RenderPass::Late }
+    fn pass(&self) -> RenderPass {
+        RenderPass::Late
+    }
 
     fn render(&mut self, ctx: &SceneContext) {
         // Draw animated backdrop only when in menu.
         // Touch buttons are drawn by imgui (build_ui in formosaic.rs).
         if ctx.show_menu {
             let res = ctx.get_camera().borrow().resolution;
-            let w   = res.x as f32;
-            let h   = res.y as f32;
+            let w = res.x as f32;
+            let h = res.y as f32;
             self.update(ctx.delta_time, w, h);
             self.render_background(w, h, ctx.lights.clear_color);
         }

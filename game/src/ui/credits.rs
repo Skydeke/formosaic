@@ -1,15 +1,19 @@
-use std::{cell::RefCell, rc::Rc};
-use formosaic_engine::architecture::scene::node::{ui_node::UiNode, scenegraph::Scenegraph};
-use imgui::*;
+use super::util::{self as util, Scale};
 use crate::formosaic::UiState;
 use crate::ui::state_machine::{UiInput, UiScreen};
-use super::util::{Scale, self as util};
+use formosaic_engine::architecture::scene::node::{scenegraph::Scenegraph, ui_node::UiNode};
+use imgui::*;
+use std::{cell::RefCell, rc::Rc};
 
 pub fn register(scene: &Scenegraph, state: Rc<RefCell<UiState>>) {
     let credits = UiNode::new("credits", move |ui, w, h, ctx| {
         let s = state.borrow();
-        if s.screen != UiScreen::Credits || !s.is_solved { return; }
-        let Some(level) = &s.current_level else { return; };
+        if s.screen != UiScreen::Credits || !s.is_solved {
+            return;
+        }
+        let Some(level) = &s.current_level else {
+            return;
+        };
         let scale = Scale::from_screen(w, h, s.is_touch);
         let level_name = level.name.clone();
         let level_author = level.author.clone();
@@ -22,7 +26,10 @@ pub fn register(scene: &Scenegraph, state: Rc<RefCell<UiState>>) {
         let pw = (w * 0.60).clamp(scale.su(320.0), scale.su(480.0));
         let inner_w = pw - scale.pad_w() * 2.0;
 
-        let _wp = ui.push_style_var(imgui::StyleVar::WindowPadding([scale.pad_w(), scale.pad_w()]));
+        let _wp = ui.push_style_var(imgui::StyleVar::WindowPadding([
+            scale.pad_w(),
+            scale.pad_w(),
+        ]));
         let _win_bg = ui.push_style_color(imgui::StyleColor::WindowBg, [0.03, 0.04, 0.06, 0.92]);
         ui.window("##credits")
             .flags(util::popup_flags())
@@ -44,8 +51,12 @@ pub fn register(scene: &Scenegraph, state: Rc<RefCell<UiState>>) {
             });
         drop(_win_bg);
         drop(_wp);
-        if open_link { ctx.push_ui_action(UiInput::ArtistLinkPressed(level_source)); }
-        if go_menu { ctx.push_ui_action(UiInput::BackToMenuPressed); }
+        if open_link {
+            ctx.push_ui_action(UiInput::ArtistLinkPressed(level_source));
+        }
+        if go_menu {
+            ctx.push_ui_action(UiInput::BackToMenuPressed);
+        }
     });
     scene.add_node(Rc::new(RefCell::new(credits)));
 }

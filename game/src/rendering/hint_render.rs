@@ -2,12 +2,9 @@
 //!
 //! Uses ShaderProgram<NoopProcessable> + UniformAdapter — same pattern as EntityRenderer.
 
+use cgmath::Vector3;
 use formosaic_engine::{
     architecture::scene::scene_context::SceneContext,
-    rendering::abstracted::{
-        irenderer::{IRenderer, RenderPass},
-        processable::NoopProcessable,
-    },
     opengl::{
         constants::data_type::DataType,
         objects::{attribute::Attribute, data_buffer::DataBuffer, ivbo::IVbo, vao::Vao},
@@ -16,8 +13,11 @@ use formosaic_engine::{
             RenderState, ShaderProgram,
         },
     },
+    rendering::abstracted::{
+        irenderer::{IRenderer, RenderPass},
+        processable::NoopProcessable,
+    },
 };
-use cgmath::Vector3;
 use std::{cell::RefCell, rc::Rc};
 
 const DEFAULT_VERT: &str = include_str!("../../assets/shaders/hint.vert.glsl");
@@ -25,15 +25,15 @@ const DEFAULT_FRAG: &str = include_str!("../../assets/shaders/hint.frag.glsl");
 
 struct FrameState {
     warmth_color: Vector3<f32>,
-    warmth:       f32,
-    hint_tier:    f32,
-    time:         f32,
+    warmth: f32,
+    hint_tier: f32,
+    time: f32,
 }
 
 pub struct HintRenderer {
-    vao:    Vao,
+    vao: Vao,
     shader: ShaderProgram<NoopProcessable>,
-    frame:  Rc<RefCell<FrameState>>,
+    frame: Rc<RefCell<FrameState>>,
 }
 
 impl HintRenderer {
@@ -56,7 +56,9 @@ impl HintRenderer {
 
         let frame = Rc::new(RefCell::new(FrameState {
             warmth_color: Vector3::new(1.0, 1.0, 1.0),
-            warmth: 0.0, hint_tier: 0.0, time: 0.0,
+            warmth: 0.0,
+            hint_tier: 0.0,
+            time: 0.0,
         }));
 
         let mut shader = ShaderProgram::<NoopProcessable>::from_sources(vert, frag)?;
@@ -65,7 +67,9 @@ impl HintRenderer {
             let f = Rc::clone(&frame);
             shader.add_per_render_uniform(Box::new(UniformAdapter {
                 uniform: UniformVec3::new("uWarmthColor"),
-                extractor: Box::new(move |_: &RenderState<NoopProcessable>| f.borrow().warmth_color),
+                extractor: Box::new(move |_: &RenderState<NoopProcessable>| {
+                    f.borrow().warmth_color
+                }),
             }));
         }
         {
@@ -95,7 +99,9 @@ impl HintRenderer {
 }
 
 impl IRenderer for HintRenderer {
-    fn pass(&self) -> RenderPass { RenderPass::Overlay }
+    fn pass(&self) -> RenderPass {
+        RenderPass::Overlay
+    }
 
     fn render(&mut self, context: &SceneContext) {
         let hints = match context.hints {
@@ -106,11 +112,13 @@ impl IRenderer for HintRenderer {
         {
             let mut f = self.frame.borrow_mut();
             f.warmth_color = Vector3::new(
-                hints.warmth_color[0], hints.warmth_color[1], hints.warmth_color[2],
+                hints.warmth_color[0],
+                hints.warmth_color[1],
+                hints.warmth_color[2],
             );
-            f.warmth    = hints.warmth;
+            f.warmth = hints.warmth;
             f.hint_tier = hints.tier as f32;
-            f.time      = hints.time;
+            f.time = hints.time;
         }
 
         unsafe {
@@ -126,7 +134,9 @@ impl IRenderer for HintRenderer {
 
         self.vao.bind();
         self.vao.enable_attributes();
-        unsafe { gl::DrawArrays(gl::TRIANGLES, 0, 6); }
+        unsafe {
+            gl::DrawArrays(gl::TRIANGLES, 0, 6);
+        }
         self.vao.unbind();
         self.shader.unbind();
 

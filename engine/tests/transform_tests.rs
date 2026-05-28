@@ -1,6 +1,4 @@
-use cgmath::{
-    InnerSpace, One, Quaternion, Rad, Rotation3, Vector3,
-};
+use cgmath::{InnerSpace, One, Quaternion, Rad, Rotation3, Vector3};
 use formosaic_engine::architecture::scene::node::node::{Node, NodeBehavior};
 use formosaic_engine::architecture::scene::node::transform::Transform;
 use std::cell::RefCell;
@@ -262,8 +260,7 @@ fn transform_parent_weak_ref_does_not_leak() {
 #[test]
 fn transform_matrix_decomposition_preserves_rotation() {
     let mut t = Transform::new();
-    let rot = Quaternion::from_angle_y(Rad(PI / 3.0))
-        * Quaternion::from_angle_x(Rad(PI / 6.0));
+    let rot = Quaternion::from_angle_y(Rad(PI / 3.0)) * Quaternion::from_angle_x(Rad(PI / 6.0));
     t.set_rotation(rot);
     t.set_position(Vector3::new(1.0, 2.0, 3.0));
     t.set_scale(Vector3::new(2.0, 3.0, 4.0));
@@ -288,5 +285,8 @@ fn transform_add_transformation_rotation_ordering() {
     t.add_transformation(&other);
 
     let fwd = t.forward();
-    assert!(fwd.y > 0.0 && fwd.y < 1.0, "fwd.y should be positive but < 1 after 45° x-rotation, got {fwd:?}");
+    assert!(
+        fwd.y > 0.0 && fwd.y < 1.0,
+        "fwd.y should be positive but < 1 after 45° x-rotation, got {fwd:?}"
+    );
 }

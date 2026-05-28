@@ -1,5 +1,5 @@
-use std::cell::Cell;
 use gl::types::*;
+use std::cell::Cell;
 
 use crate::opengl::constants::data_type::DataType;
 

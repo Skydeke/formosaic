@@ -5,58 +5,55 @@
 //!   `add_renderer()`       — geometry, late, or overlay renderers (sorted by pass)
 //!   `add_imgui_renderer()` — the Dear ImGui renderer; always runs last, after overlay
 
+#[cfg(feature = "windowed")]
+use crate::rendering::instances::imgui_render::ImguiGlRenderer;
 use crate::{
     architecture::scene::{entity::simple_entity::SimpleEntity, scene_context::SceneContext},
-    rendering::{
-        abstracted::irenderer::{IRenderer, RenderPass},
-        instances::entity_render::EntityRenderer,
-    },
     opengl::{
         constants::{data_type::DataType, format_type::FormatType},
         fbos::{
-            attachment::texture_attachment::TextureAttachment,
-            fbo::Fbo,
-            fbo_target::FboTarget,
+            attachment::texture_attachment::TextureAttachment, fbo::Fbo, fbo_target::FboTarget,
             scene_fbo::SceneFbo,
         },
         shaders::lighting_pass::LightingPass,
         textures::{
             parameters::{
-                mag_filter_parameter::MagFilterParameter,
-                min_filter_parameter::MinFilterParameter,
+                mag_filter_parameter::MagFilterParameter, min_filter_parameter::MinFilterParameter,
             },
             texture_configs::TextureConfigs,
         },
     },
+    rendering::{
+        abstracted::irenderer::{IRenderer, RenderPass},
+        instances::entity_render::EntityRenderer,
+    },
 };
-#[cfg(feature = "windowed")]
-use crate::rendering::instances::imgui_render::ImguiGlRenderer;
 use cgmath::Vector2;
 use std::{cell::RefCell, rc::Rc};
 
 pub struct Pipeline {
     /// General renderers — geometry, late, overlay — sorted by pass internally.
-    renderers:     Vec<Box<dyn IRenderer>>,
+    renderers: Vec<Box<dyn IRenderer>>,
     /// Dedicated imgui renderer — always runs after all other passes.
     /// Stored separately so it can be accessed directly without any downcast.
     #[cfg(feature = "windowed")]
-    imgui:         Option<ImguiGlRenderer>,
-    context:       Rc<RefCell<SceneContext>>,
-    deferred_fbo:  Fbo,
+    imgui: Option<ImguiGlRenderer>,
+    context: Rc<RefCell<SceneContext>>,
+    deferred_fbo: Fbo,
     lighting_pass: LightingPass,
-    scene_fbo:     SceneFbo,
+    scene_fbo: SceneFbo,
 }
 
 impl Pipeline {
     pub fn new(context: Rc<RefCell<SceneContext>>) -> Self {
         let mut pipeline = Self {
-            renderers:     Vec::new(),
+            renderers: Vec::new(),
             #[cfg(feature = "windowed")]
-            imgui:         None,
+            imgui: None,
             context,
-            deferred_fbo:  Self::create_deferred_fbo(1, 1),
+            deferred_fbo: Self::create_deferred_fbo(1, 1),
             lighting_pass: LightingPass::new(),
-            scene_fbo:     SceneFbo::new(1, 1),
+            scene_fbo: SceneFbo::new(1, 1),
         };
         pipeline.add_renderer(Box::new(
             EntityRenderer::<SimpleEntity>::new().expect("Can't create EntityRenderer."),
@@ -90,7 +87,9 @@ impl Pipeline {
 
     /// Draw one frame. `SceneContext` must already reflect current game state.
     pub fn draw(&mut self, width: u32, height: u32) {
-        self.context.borrow_mut().set_resolution(Vector2::new(width, height));
+        self.context
+            .borrow_mut()
+            .set_resolution(Vector2::new(width, height));
 
         if !self.scene_fbo.fbo.is_sized(width as i32, height as i32) {
             self.scene_fbo.fbo.resize(width as i32, height as i32);
@@ -100,23 +99,26 @@ impl Pipeline {
         }
 
         {
-            use crate::rendering::render_output_data::RenderOutputData;
             use crate::opengl::fbos::simple_texture::SimpleTexture;
+            use crate::rendering::render_output_data::RenderOutputData;
             let a = self.deferred_fbo.get_attachments();
             if a.len() >= 3 {
-                let colour_id   = a[0].get_texture().get_id();
-                let normal_id   = a[1].get_texture().get_id();
+                let colour_id = a[0].get_texture().get_id();
+                let normal_id = a[1].get_texture().get_id();
                 let position_id = a[2].get_texture().get_id();
-                let depth_id    = self.deferred_fbo
+                let depth_id = self
+                    .deferred_fbo
                     .get_depth_attachment()
                     .map(|d| d.get_texture().get_id())
                     .unwrap_or(0);
-                self.context.borrow_mut().set_output_data(RenderOutputData::new(
-                    Box::new(SimpleTexture::new(colour_id)),
-                    Box::new(SimpleTexture::new(normal_id)),
-                    Box::new(SimpleTexture::new(depth_id)),
-                    Box::new(SimpleTexture::new(position_id)),
-                ));
+                self.context
+                    .borrow_mut()
+                    .set_output_data(RenderOutputData::new(
+                        Box::new(SimpleTexture::new(colour_id)),
+                        Box::new(SimpleTexture::new(normal_id)),
+                        Box::new(SimpleTexture::new(depth_id)),
+                        Box::new(SimpleTexture::new(position_id)),
+                    ));
             }
         }
 
@@ -150,9 +152,13 @@ impl Pipeline {
             self.context.borrow_mut().update();
             let ctx = self.context.borrow();
             for r in &mut self.renderers {
-                if r.pass() == RenderPass::Geometry { r.render(&ctx); }
+                if r.pass() == RenderPass::Geometry {
+                    r.render(&ctx);
+                }
             }
-            unsafe { gl::Disable(gl::POLYGON_OFFSET_FILL); }
+            unsafe {
+                gl::Disable(gl::POLYGON_OFFSET_FILL);
+            }
         } else {
             self.context.borrow_mut().update();
         }
@@ -172,7 +178,9 @@ impl Pipeline {
     fn late_pass(&mut self) {
         let ctx = self.context.borrow();
         for r in &mut self.renderers {
-            if r.pass() == RenderPass::Late { r.render(&ctx); }
+            if r.pass() == RenderPass::Late {
+                r.render(&ctx);
+            }
         }
     }
 
@@ -188,7 +196,9 @@ impl Pipeline {
         }
         let ctx = self.context.borrow();
         for r in &mut self.renderers {
-            if r.pass() == RenderPass::Overlay { r.render(&ctx); }
+            if r.pass() == RenderPass::Overlay {
+                r.render(&ctx);
+            }
         }
     }
 
@@ -207,21 +217,27 @@ impl Pipeline {
     }
 
     fn finish_pass(&mut self) {
-        for r in &mut self.renderers { r.finish(); }
+        for r in &mut self.renderers {
+            r.finish();
+        }
         #[cfg(feature = "windowed")]
-        if let Some(r) = &mut self.imgui { r.finish(); }
+        if let Some(r) = &mut self.imgui {
+            r.finish();
+        }
     }
 
     fn create_deferred_fbo(w: i32, h: i32) -> Fbo {
         let mut fbo = Fbo::create(w, h);
         fbo.bind(FboTarget::Framebuffer);
 
-        let mut albedo = TextureConfigs::new(FormatType::Rgba16F, FormatType::Rgba, DataType::Float);
+        let mut albedo =
+            TextureConfigs::new(FormatType::Rgba16F, FormatType::Rgba, DataType::Float);
         albedo.mag_filter = Some(MagFilterParameter::Nearest);
         albedo.min_filter = Some(MinFilterParameter::Nearest);
         fbo.add_attachment(TextureAttachment::of_colour(0, albedo));
 
-        let mut normal = TextureConfigs::new(FormatType::Rgba16F, FormatType::Rgba, DataType::Float);
+        let mut normal =
+            TextureConfigs::new(FormatType::Rgba16F, FormatType::Rgba, DataType::Float);
         normal.mag_filter = Some(MagFilterParameter::Linear);
         normal.min_filter = Some(MinFilterParameter::Linear);
         fbo.add_attachment(TextureAttachment::of_colour(1, normal));
@@ -232,7 +248,9 @@ impl Pipeline {
         fbo.add_attachment(TextureAttachment::of_colour(2, pos));
 
         let mut depth = TextureConfigs::new(
-            FormatType::DepthComponent24, FormatType::DepthComponent, DataType::UInt,
+            FormatType::DepthComponent24,
+            FormatType::DepthComponent,
+            DataType::UInt,
         );
         depth.mag_filter = Some(MagFilterParameter::Linear);
         depth.min_filter = Some(MinFilterParameter::Linear);

@@ -8,6 +8,7 @@ pub struct OrbitController {
     pub target: Vector3<f32>,
     pub distance: f32,
     pub sensitivity: f32,
+    target_provider: Option<Box<dyn Fn() -> Vector3<f32>>>,
 
     dragging: bool,
     last_x: f32,
@@ -24,12 +25,27 @@ impl OrbitController {
             target,
             distance,
             sensitivity: 1.5,
+            target_provider: None,
             dragging: false,
             last_x: 0.0,
             last_y: 0.0,
             delta_x: 0.0,
             delta_y: 0.0,
         }
+    }
+
+    pub fn following(
+        target: Vector3<f32>,
+        distance: f32,
+        target_provider: Box<dyn Fn() -> Vector3<f32>>,
+    ) -> Self {
+        let mut controller = Self::new(target, distance);
+        controller.target_provider = Some(target_provider);
+        controller
+    }
+
+    pub fn set_target_provider(&mut self, target_provider: Option<Box<dyn Fn() -> Vector3<f32>>>) {
+        self.target_provider = target_provider;
     }
 
     /// Tell the controller the camera's starting world position.
@@ -45,6 +61,14 @@ impl OrbitController {
         self.distance = offset.magnitude().max(0.001);
         self.delta_x = 0.0;
         self.delta_y = 0.0;
+    }
+
+    pub fn set_target_preserve_offset(&mut self, transform: &mut Transform, target: Vector3<f32>) {
+        let offset = transform.position - self.target;
+        self.target = target;
+        transform.position = self.target + offset;
+        self.distance = offset.magnitude().max(0.001);
+        transform.look_at(self.target, Vector3::unit_y());
     }
 
     /// Instantly place the camera so it looks along `dir` (dir = FROM camera TOWARD target).
@@ -90,6 +114,13 @@ impl OrbitController {
     }
 
     fn apply_rotation(&mut self, transform: &mut Transform) {
+        if let Some(target_provider) = &self.target_provider {
+            let target = target_provider();
+            if (target - self.target).magnitude2() > 0.000001 {
+                self.set_target_preserve_offset(transform, target);
+            }
+        }
+
         // Current offset from target
         let mut offset = transform.position - self.target;
         if offset.magnitude2() < self.distance {

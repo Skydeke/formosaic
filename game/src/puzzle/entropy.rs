@@ -35,6 +35,8 @@ use std::f32::consts::PI;
 use formosaic_engine::architecture::models::model::Model;
 use formosaic_engine::architecture::models::simple_model::SimpleModel;
 
+use super::puzzle_params::PuzzleParams;
+
 // ─── Public types ────────────────────────────────────────────────────────────
 
 /// Quality descriptor returned by `analyse_axis`.
@@ -67,12 +69,9 @@ pub struct AxisSearchResult {
 
 /// Analyse how good `axis` is as a Formosaic puzzle solution axis for `model`.
 ///
-/// `scramble_offsets_flat` is the flat list of per-vertex scramble offsets
-/// as stored in `Mesh::scramble_offsets` (3 floats per vertex, triangle order).
-pub fn analyse_axis(
-    scramble_offsets_flat: &[f32],
-    axis: Vector3<f32>,
-) -> EntropyReport {
+/// `offsets_flat` is the flat list of per-vertex displacement offsets
+/// as stored in `Mesh::displacement_offsets` (3 floats per vertex, triangle order).
+pub fn analyse_axis(scramble_offsets_flat: &[f32], axis: Vector3<f32>) -> EntropyReport {
     let directions = fibonacci_sphere(64);
     let scores: Vec<f32> = directions
         .iter()
@@ -92,9 +91,10 @@ pub fn best_scramble_axis(
     target_world_radius: f32,
     fov_radians: f32,
 ) -> AxisSearchResult {
-    let params = model.compute_puzzle_params(target_world_radius, fov_radians);
+    let params = PuzzleParams::from_model(model, target_world_radius, fov_radians);
     let positions = model_positions_flat(model);
-    let result = best_scramble_axis_from_offsets(&positions, params.min_disp, params.max_disp, candidates);
+    let result =
+        best_scramble_axis_from_offsets(&positions, params.min_disp, params.max_disp, candidates);
     log::info!(
         "[Entropy] best axis entropy={:.3} bits  isolation={:.2}°  difficulty={:.2}",
         result.report.entropy_bits,
@@ -132,21 +132,18 @@ pub fn best_scramble_axis_from_offsets(
 
     for _ in 0..candidates {
         let theta: f32 = rng.random_range(0.0..2.0 * PI);
-        let phi: f32   = rng.random_range(-MAX_ELEV..MAX_ELEV);
-        let axis = Vector3::new(
-            phi.cos() * theta.cos(),
-            phi.sin(),
-            phi.cos() * theta.sin(),
-        ).normalize();
+        let phi: f32 = rng.random_range(-MAX_ELEV..MAX_ELEV);
+        let axis =
+            Vector3::new(phi.cos() * theta.cos(), phi.sin(), phi.cos() * theta.sin()).normalize();
 
         let offsets = simulate_scramble_offsets(positions_flat, axis, min_disp, max_disp);
-        let report  = analyse_axis(&offsets, axis);
+        let report = analyse_axis(&offsets, axis);
 
         let score = report.entropy_bits - report.solution_isolation_rad * 2.0;
         let best_score = best_report.entropy_bits - best_report.solution_isolation_rad * 2.0;
 
         if score < best_score {
-            best_axis   = axis;
+            best_axis = axis;
             best_report = report;
         }
     }
@@ -158,7 +155,10 @@ pub fn best_scramble_axis_from_offsets(
         best_report.difficulty,
     );
 
-    AxisSearchResult { axis: best_axis, report: best_report }
+    AxisSearchResult {
+        axis: best_axis,
+        report: best_report,
+    }
 }
 
 /// Difficulty label for UI display.
@@ -167,7 +167,7 @@ pub fn difficulty_label(difficulty: f32) -> &'static str {
         d if d < 0.25 => "Easy",
         d if d < 0.50 => "Medium",
         d if d < 0.75 => "Hard",
-        _             => "Expert",
+        _ => "Expert",
     }
 }
 
@@ -241,12 +241,12 @@ fn entropy_report(
     // that isn't near the solution.
     let solution_dot = solution_axis.normalize();
     let mut second_best_score = 0.0f32;
-    let mut second_best_dot   = 0.0f32;
+    let mut second_best_dot = 0.0f32;
     for (i, &d) in directions.iter().enumerate() {
         let dot = d.dot(solution_dot).abs();
         if dot < 0.95 && scores[i] > second_best_score {
             second_best_score = scores[i];
-            second_best_dot   = dot;
+            second_best_dot = dot;
         }
     }
     let solution_isolation_rad = second_best_dot.acos().min(PI);
@@ -259,7 +259,7 @@ fn entropy_report(
     // Also factor in peak score: a weak peak (< 0.5) means the puzzle may not
     // have a satisfying snap moment, increasing perceived difficulty.
     let peak_factor = (1.0 - peak_score).clamp(0.0, 1.0) * 0.3;
-    let difficulty  = (normalised_entropy * 0.7 + peak_factor).clamp(0.0, 1.0);
+    let difficulty = (normalised_entropy * 0.7 + peak_factor).clamp(0.0, 1.0);
 
     EntropyReport {
         entropy_bits,
@@ -276,12 +276,8 @@ fn fibonacci_sphere(n: usize) -> Vec<Vector3<f32>> {
     (0..n)
         .map(|i| {
             let theta = 2.0 * PI * i as f32 / golden;
-            let phi   = (1.0 - 2.0 * (i as f32 + 0.5) / n as f32).acos();
-            Vector3::new(
-                phi.sin() * theta.cos(),
-                phi.cos(),
-                phi.sin() * theta.sin(),
-            )
+            let phi = (1.0 - 2.0 * (i as f32 + 0.5) / n as f32).acos();
+            Vector3::new(phi.sin() * theta.cos(), phi.cos(), phi.sin() * theta.sin())
         })
         .collect()
 }
@@ -296,7 +292,7 @@ fn model_positions_flat(model: &SimpleModel) -> Vec<f32> {
 }
 
 /// Simulate what the scramble offsets would look like for a given axis,
-/// without touching any GPU state.  Uses the same distribution as `scramble_along_axis`.
+/// without touching any GPU state.  Uses the same distribution as `compute_scramble_offsets`.
 fn simulate_scramble_offsets(
     positions_flat: &[f32],
     axis: Vector3<f32>,
@@ -318,7 +314,7 @@ fn simulate_scramble_offsets(
         let base = tri * 9;
         for corner in 0..3 {
             let v = base + corner * 3;
-            offsets[v]     = disp.x;
+            offsets[v] = disp.x;
             offsets[v + 1] = disp.y;
             offsets[v + 2] = disp.z;
         }

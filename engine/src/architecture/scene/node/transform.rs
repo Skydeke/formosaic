@@ -44,11 +44,8 @@ impl Transform {
             basis_z.magnitude().max(0.000001),
         );
 
-        let rot_matrix = Matrix3::from_cols(
-            basis_x / scale.x,
-            basis_y / scale.y,
-            basis_z / scale.z,
-        );
+        let rot_matrix =
+            Matrix3::from_cols(basis_x / scale.x, basis_y / scale.y, basis_z / scale.z);
 
         Self {
             position,

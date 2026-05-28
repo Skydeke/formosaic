@@ -13,13 +13,18 @@ fn perspective_projection_updates_on_resolution_change() {
     cam.update_projection_matrix();
     let second = cam.projection_matrix;
 
-    assert_ne!(first, second, "aspect ratio should affect projection matrix");
+    assert_ne!(
+        first, second,
+        "aspect ratio should affect projection matrix"
+    );
 }
 
 #[test]
 fn orthographic_projection_is_deterministic() {
     let mut cam = Camera::new();
-    cam.set_projection(Box::new(OrthographicProjection::new(-2.0, 2.0, -1.0, 1.0, 0.1, 100.0)));
+    cam.set_projection(Box::new(OrthographicProjection::new(
+        -2.0, 2.0, -1.0, 1.0, 0.1, 100.0,
+    )));
     cam.set_resolution(Vector2::new(800, 600));
     cam.update_projection_matrix();
 

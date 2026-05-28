@@ -37,5 +37,7 @@ pub trait Application {
 
     // ── Platform hints ────────────────────────────────────────────────────
     /// The window title shown in the OS title bar.
-    fn title(&self) -> &str { "App" }
+    fn title(&self) -> &str {
+        "App"
+    }
 }

@@ -1,4 +1,3 @@
-
 use crate::opengl::{
     constants::{data_type::DataType, format_type::FormatType, gl_buffer::GlBuffer},
     fbos::{attachment::texture_attachment::TextureAttachment, fbo::Fbo, fbo_target::FboTarget},
@@ -69,4 +68,3 @@ impl SceneFbo {
         self.fbo.unbind(FboTarget::ReadFramebuffer);
     }
 }
-

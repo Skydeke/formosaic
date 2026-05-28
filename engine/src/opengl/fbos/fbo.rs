@@ -1,8 +1,31 @@
+//! Framebuffer Object wrapper.
+//!
+//! # Safety invariants
+//!
+//! Every `unsafe { gl::* }` call in this module is sound because:
+//!
+//! - `id` is always a valid FBO name from `gl::GenFramebuffers` or zero
+//!   (meaning the default framebuffer).  The default is never created here.
+//! - `width` / `height` track the logical dimensions; all attachments are
+//!   resized together via `resize()`.
+//! - Attachment textures are owned by the FBO via `Box<dyn Attachment>`, so
+//!   the texture names passed to `gl::FramebufferTexture2D` remain valid for
+//!   the FBO's lifetime.
+//! - `gl::DrawBuffers` receives a correctly-sized buffer of attachment points
+//!   collected from the current `draw_attachments`.
+//! - `gl::ReadBuffer` receives a single attachment point from `read_attachment`.
+//! - `blit_fbo` binds both source and destination FBOs before calling
+//!   `gl::BlitFramebuffer`, ensuring the targets are current.
+//! - `delete()` is idempotent in the sense that GL silently ignores a
+//!   `gl::DeleteFramebuffers` call with an already-deleted name (the driver
+//!   may re-use the name, but the wrapper never double-frees).
+//! - The caller must ensure the GL context is current when calling any method
+//!   that issues GL commands.
+
 use crate::opengl::constants::gl_buffer::GlBuffer;
 use crate::opengl::fbos::attachment::attachment::Attachment;
 use crate::opengl::fbos::attachment::attachment_type::AttachmentType;
 use crate::opengl::fbos::fbo_target::FboTarget;
-use crate::opengl::fbos::ifbo::IFbo;
 use crate::opengl::textures::parameters::mag_filter_parameter::MagFilterParameter;
 use gl;
 
@@ -150,19 +173,20 @@ impl Fbo {
         self.draw_attachments = Some(list);
     }
 
-    fn get_read_attachment(&mut self) -> &Box<dyn Attachment> {
+    fn get_read_attachment(&mut self) -> Option<&Box<dyn Attachment>> {
         if self.attachments.is_empty() {
-            panic!("Cannot read from empty Fbo");
+            return None;
         }
         if self.read_attachment.is_none() {
             self.read_attachment = Some(self.attachments[0].clone_attachment());
         }
-        self.read_attachment.as_ref().unwrap()
+        self.read_attachment.as_ref()
     }
 
     fn read_attachment(&mut self) {
-        let attachment = self.get_read_attachment();
-        unsafe { gl::ReadBuffer(attachment.get_attachment_point() as u32) };
+        if let Some(attachment) = self.get_read_attachment() {
+            unsafe { gl::ReadBuffer(attachment.get_attachment_point() as u32) };
+        }
     }
 
     fn get_draw_attachments(&self) -> Vec<Box<dyn Attachment>> {
@@ -249,38 +273,5 @@ impl Fbo {
 impl Drop for Fbo {
     fn drop(&mut self) {
         self.delete();
-    }
-}
-
-impl IFbo for Fbo {
-    fn blit_fbo(&mut self, fbo: &mut dyn IFbo, filter: MagFilterParameter, buffers: &[GlBuffer]) {
-        // Convert dyn IFbo to &Fbo for compatibility
-        if let Some(concrete_fbo) = (fbo as &mut dyn std::any::Any).downcast_mut::<Fbo>() {
-            Fbo::blit_fbo(self, concrete_fbo, filter, buffers);
-        }
-    }
-
-    fn get_width(&self) -> i32 {
-        self.width
-    }
-
-    fn get_height(&self) -> i32 {
-        self.height
-    }
-
-    fn resize(&mut self, width: i32, height: i32) {
-        Fbo::resize(self, width, height);
-    }
-
-    fn bind(&mut self, target: FboTarget) {
-        Fbo::bind(self, target);
-    }
-
-    fn unbind(&self, target: FboTarget) {
-        Fbo::unbind(self, target);
-    }
-
-    fn delete(&mut self) {
-        Fbo::delete(self);
     }
 }

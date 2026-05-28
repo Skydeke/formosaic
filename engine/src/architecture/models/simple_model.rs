@@ -1,4 +1,4 @@
-use cgmath::{Matrix4, SquareMatrix, Vector3, Vector4};
+use cgmath::{Matrix4, Vector3, Vector4};
 
 use crate::architecture::models::animation::AnimationClip;
 use crate::architecture::models::animation_player::AnimationPlayer;
@@ -9,83 +9,6 @@ use crate::opengl::constants::render_mode::RenderMode;
 use crate::opengl::shaders::RenderState;
 use crate::rendering::abstracted::processable::Processable;
 use crate::rendering::abstracted::renderable::Renderable;
-
-/// Puzzle setup parameters derived from model geometry analysis.
-#[derive(Debug, Clone, Copy)]
-pub struct PuzzleParams {
-    /// Uniform scale to apply to the entity so the model fits the target world radius.
-    pub entity_scale: f32,
-    /// Camera orbit distance for a comfortable view.
-    pub orbit_distance: f32,
-    /// Minimum scramble displacement in model space.
-    pub min_disp: f32,
-    /// Maximum scramble displacement in model space.
-    pub max_disp: f32,
-    /// Bounding-sphere radius in model space (informational).
-    pub model_space_radius: f32,
-}
-
-impl PuzzleParams {
-    /// Compute puzzle parameters from raw per-mesh position data and transforms.
-    /// No GPU context needed — works on the background thread.
-    pub fn from_raw_positions(
-        mesh_positions: &[&[f32]],
-        mesh_transforms: &[Matrix4<f32>],
-        target_world_radius: f32,
-        fov_radians: f32,
-    ) -> Self {
-        use cgmath::InnerSpace;
-        let mut min = Vector3::new(f32::INFINITY, f32::INFINITY, f32::INFINITY);
-        let mut max = Vector3::new(f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY);
-
-        for (mesh_idx, pos) in mesh_positions.iter().enumerate() {
-            let mesh_transform = mesh_transforms
-                .get(mesh_idx)
-                .copied()
-                .unwrap_or_else(|| Matrix4::from_scale(1.0));
-            let mut i = 0;
-            while i + 2 < pos.len() {
-                let p = mesh_transform * Vector4::new(pos[i], pos[i + 1], pos[i + 2], 1.0);
-                let (x, y, z) = (p.x, p.y, p.z);
-                if x < min.x { min.x = x; }
-                if y < min.y { min.y = y; }
-                if z < min.z { min.z = z; }
-                if x > max.x { max.x = x; }
-                if y > max.y { max.y = y; }
-                if z > max.z { max.z = z; }
-                i += 3;
-            }
-        }
-
-        if min.x == f32::INFINITY {
-            return Self::default_for(target_world_radius);
-        }
-
-        let extent = max - min;
-        let model_radius = (extent.magnitude() * 0.5).max(0.001);
-        let entity_scale = target_world_radius / model_radius;
-        let half_fov = fov_radians * 0.5;
-        let orbit_distance = target_world_radius / (half_fov.tan() * 0.65);
-
-        Self {
-            entity_scale,
-            orbit_distance,
-            min_disp: model_radius * 0.02,
-            max_disp: model_radius * 0.12,
-            model_space_radius: model_radius,
-        }
-    }
-
-    pub fn default_for(target_world_radius: f32) -> Self {
-        Self {
-            entity_scale: 0.005,
-            orbit_distance: target_world_radius * 3.0,
-            min_disp: 3.0,
-            max_disp: 15.0,
-            model_space_radius: 1.0,
-        }
-    }
-}
 
 pub struct SimpleModel {
     meshes: Vec<Mesh>,
@@ -99,20 +22,22 @@ pub struct SimpleModel {
 }
 
 impl SimpleModel {
-    pub fn new(meshes: Vec<Mesh>, render_mode: RenderMode) -> Self {
+    /// Creates a new SimpleModel. Returns an error if `meshes` is empty.
+    pub fn new(meshes: Vec<Mesh>, render_mode: RenderMode) -> Result<Self, &'static str> {
         Self::with_bounds(meshes, render_mode)
     }
 
+    /// Returns an error if `meshes` is empty.
     pub fn with_centroid(
         meshes: Vec<Mesh>,
         render_mode: RenderMode,
         centroid: Vector3<f32>,
-    ) -> Self {
-        let mesh_count = meshes.len();
+    ) -> Result<Self, &'static str> {
         if meshes.is_empty() {
-            panic!("SimpleModel must have at least one mesh");
+            return Err("SimpleModel must have at least one mesh");
         }
-        Self {
+        let mesh_count = meshes.len();
+        Ok(Self {
             meshes,
             render_mode,
             centroid: Some(centroid),
@@ -121,15 +46,16 @@ impl SimpleModel {
             animations: Vec::new(),
             player: AnimationPlayer::new(),
             bone_matrices: Vec::new(),
-        }
+        })
     }
 
-    pub fn with_bounds(meshes: Vec<Mesh>, render_mode: RenderMode) -> Self {
-        let mesh_count = meshes.len();
+    /// Returns an error if `meshes` is empty.
+    pub fn with_bounds(meshes: Vec<Mesh>, render_mode: RenderMode) -> Result<Self, &'static str> {
         if meshes.is_empty() {
-            panic!("SimpleModel must have at least one mesh");
+            return Err("SimpleModel must have at least one mesh");
         }
-        Self {
+        let mesh_count = meshes.len();
+        Ok(Self {
             meshes,
             render_mode,
             centroid: None,
@@ -138,19 +64,20 @@ impl SimpleModel {
             animations: Vec::new(),
             player: AnimationPlayer::new(),
             bone_matrices: Vec::new(),
-        }
+        })
     }
 
+    /// Returns an error if `meshes` is empty.
     pub fn with_mesh_transforms(
         meshes: Vec<Mesh>,
         render_mode: RenderMode,
         centroid: Option<Vector3<f32>>,
         mesh_transforms: Vec<Matrix4<f32>>,
-    ) -> Self {
+    ) -> Result<Self, &'static str> {
         if meshes.is_empty() {
-            panic!("SimpleModel must have at least one mesh");
+            return Err("SimpleModel must have at least one mesh");
         }
-        Self {
+        Ok(Self {
             meshes,
             render_mode,
             centroid,
@@ -159,32 +86,118 @@ impl SimpleModel {
             animations: Vec::new(),
             player: AnimationPlayer::new(),
             bone_matrices: Vec::new(),
-        }
+        })
     }
 
     pub fn meshes(&self) -> &[Mesh] {
         &self.meshes
     }
 
-    pub fn set_animation_data(&mut self, skeleton: Option<Skeleton>, animations: Vec<AnimationClip>) {
+    pub fn set_animation_data(
+        &mut self,
+        skeleton: Option<Skeleton>,
+        animations: Vec<AnimationClip>,
+    ) {
         self.skeleton = skeleton;
         self.animations = animations;
-        let bone_count = self.skeleton.as_ref().map(|s| s.bone_count()).unwrap_or(0);
-        self.bone_matrices = vec![Matrix4::identity(); bone_count.max(1)];
+        if let Some(ref mut skel) = self.skeleton {
+            let bind_poses: Vec<Matrix4<f32>> =
+                skel.bones.iter().map(|b| b.bind_local_transform).collect();
+            self.bone_matrices = skel.compute_final_matrices(&bind_poses).to_vec();
+        } else {
+            self.bone_matrices = Vec::new();
+        }
     }
 
     pub fn update_animation(&mut self, dt: f32) {
         if let Some(ref mut skel) = self.skeleton {
-            self.player.update(dt);
             self.bone_matrices = self.player.evaluate(skel);
+            self.player.update(dt);
         }
     }
 
     pub fn bone_matrices(&self) -> &[Matrix4<f32>] {
-        if self.skeleton.is_some() && self.player.has_clip() {
+        if self.skeleton.is_some() {
             &self.bone_matrices
         } else {
             &[]
+        }
+    }
+
+    pub fn visual_center(&self) -> Option<Vector3<f32>> {
+        let mut min = Vector3::new(f32::INFINITY, f32::INFINITY, f32::INFINITY);
+        let mut max = Vector3::new(f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY);
+        let bones = self.bone_matrices();
+
+        for (mesh_idx, mesh) in self.meshes.iter().enumerate() {
+            let mesh_transform = self
+                .mesh_transforms
+                .get(mesh_idx)
+                .copied()
+                .unwrap_or_else(|| Matrix4::from_scale(1.0));
+            let pos = mesh.positions();
+            let offsets = mesh.displacement_offsets();
+            let displacement_t = mesh.current_displacement_lerp();
+            let bone_indices = mesh.bone_indices();
+            let bone_weights = mesh.bone_weights();
+
+            let mut vertex_idx = 0usize;
+            let mut i = 0usize;
+            while i + 2 < pos.len() {
+                let local = Vector4::new(
+                    pos[i] + offsets.get(i).copied().unwrap_or(0.0) * displacement_t,
+                    pos[i + 1] + offsets.get(i + 1).copied().unwrap_or(0.0) * displacement_t,
+                    pos[i + 2] + offsets.get(i + 2).copied().unwrap_or(0.0) * displacement_t,
+                    1.0,
+                );
+
+                let skinned = if !bones.is_empty() {
+                    let mut blended = Vector4::new(0.0, 0.0, 0.0, 0.0);
+                    let mut has_influence = false;
+                    if let (Some(indices), Some(weights)) =
+                        (bone_indices.get(vertex_idx), bone_weights.get(vertex_idx))
+                    {
+                        for influence in 0..4 {
+                            let bone_idx = indices[influence];
+                            let weight = weights[influence];
+                            if bone_idx >= 0 && weight > 0.0 {
+                                if let Some(bone) = bones.get(bone_idx as usize) {
+                                    blended += *bone * local * weight;
+                                    has_influence = true;
+                                }
+                            }
+                        }
+                    }
+                    if has_influence {
+                        blended
+                    } else {
+                        local
+                    }
+                } else {
+                    local
+                };
+
+                let p = if mesh.is_skinned() && !bones.is_empty() {
+                    skinned
+                } else {
+                    mesh_transform * skinned
+                };
+                min.x = min.x.min(p.x);
+                min.y = min.y.min(p.y);
+                min.z = min.z.min(p.z);
+                max.x = max.x.max(p.x);
+                max.y = max.y.max(p.y);
+                max.z = max.z.max(p.z);
+
+                vertex_idx += 1;
+                i += 3;
+            }
+        }
+
+        if min.x == f32::INFINITY {
+            self.centroid
+        } else {
+            Some((min + max) * 0.5)
         }
     }
 
@@ -192,22 +205,17 @@ impl SimpleModel {
         &self.animations
     }
 
-    pub fn pick_random_animation(&mut self) {
-        if self.animations.is_empty() {
-            return;
-        }
-        use rand::Rng;
-        let idx = rand::rng().random_range(0..self.animations.len());
-        self.player.play(self.animations[idx].clone());
-    }
-
     pub fn pick_solve_animation(&mut self) {
         if self.animations.is_empty() {
             return;
         }
 
-        let prefer = ["idle", "interact", "pose", "stand", "celebrat", "victory", "win", "success"];
-        let avoid = ["run", "walk", "jump", "fall", "hit", "punch", "attack", "roll", "hurt"];
+        let prefer = [
+            "idle", "interact", "pose", "stand", "celebrat", "victory", "win", "success",
+        ];
+        let avoid = [
+            "run", "walk", "jump", "fall", "hit", "punch", "attack", "roll", "hurt",
+        ];
 
         let chosen = self
             .animations
@@ -219,89 +227,30 @@ impl SimpleModel {
             })
             .max_by_key(|(_, clip)| {
                 let n = clip.name.to_lowercase();
-                prefer.iter().position(|k| n.contains(k)).map(|i| 100 - i as i32).unwrap_or(0)
+                prefer
+                    .iter()
+                    .position(|k| n.contains(k))
+                    .map(|i| 100 - i as i32)
+                    .unwrap_or(0)
             })
             .map(|(idx, clip)| (idx, clip.clone()))
             .or_else(|| self.animations.first().cloned().map(|clip| (0, clip)));
 
-        let Some((idx, clip)) = chosen else { return; };
+        let Some((_idx, clip)) = chosen else {
+            return;
+        };
 
         self.player.play(clip);
-    }
 
-    /// Analyse the model geometry and return parameters suitable for puzzle setup.
-    ///
-    /// Computes:
-    /// - The bounding-sphere radius in model space (half the AABB diagonal).
-    /// - Recommended entity world scale so the model's bounding sphere has a
-    ///   given target world-space radius.
-    /// - Recommended orbit camera distance for a comfortable view.
-    /// - Recommended scramble displacement range (min/max) in model space,
-    ///   proportional to model size so gaps look the same regardless of model.
-    pub fn compute_puzzle_params(
-        &self,
-        target_world_radius: f32,
-        fov_radians: f32,
-    ) -> PuzzleParams {
-        use cgmath::InnerSpace;
-
-        // ── Bounding box in model space ───────────────────────────────────────
-        let mut min = Vector3::new(f32::INFINITY, f32::INFINITY, f32::INFINITY);
-        let mut max = Vector3::new(f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY);
-
-        for (mesh_idx, mesh) in self.meshes.iter().enumerate() {
-            let mesh_transform = self
-                .mesh_transforms
-                .get(mesh_idx)
-                .copied()
-                .unwrap_or_else(|| Matrix4::from_scale(1.0));
-            let pos = mesh.positions();
-            let mut i = 0;
-            while i + 2 < pos.len() {
-                let p = mesh_transform * Vector4::new(pos[i], pos[i + 1], pos[i + 2], 1.0);
-                let x = p.x;
-                let y = p.y;
-                let z = p.z;
-                if x < min.x { min.x = x; }
-                if y < min.y { min.y = y; }
-                if z < min.z { min.z = z; }
-                if x > max.x { max.x = x; }
-                if y > max.y { max.y = y; }
-                if z > max.z { max.z = z; }
-                i += 3;
-            }
-        }
-
-        if min.x == f32::INFINITY {
-            return PuzzleParams::default_for(target_world_radius);
-        }
-
-        let extent = max - min;
-        let model_radius = extent.magnitude() * 0.5;
-        let model_radius = model_radius.max(0.001);
-
-        let entity_scale = target_world_radius / model_radius;
-        let half_fov = fov_radians * 0.5;
-        let orbit_distance = target_world_radius / (half_fov.tan() * 0.65);
-
-        PuzzleParams {
-            entity_scale,
-            orbit_distance,
-            min_disp: model_radius * 0.02,
-            max_disp: model_radius * 0.12,
-            model_space_radius: model_radius,
+        // Immediately evaluate so bone_matrices reflect the first frame.
+        if let Some(ref mut skel) = self.skeleton {
+            self.bone_matrices = self.player.evaluate(skel);
         }
     }
 
-    pub fn scramble_along_axis(&mut self, axis: Vector3<f32>, min_disp: f32, max_disp: f32) {
-        for (mesh_idx, mesh) in self.meshes.iter_mut().enumerate() {
-            let mesh_transform = self
-                .mesh_transforms
-                .get(mesh_idx)
-                .cloned()
-                .unwrap_or_else(|| cgmath::Matrix4::from_scale(1.0));
-
-            mesh.scramble_along_axis(axis, min_disp, max_disp, mesh_transform);
+    pub fn set_displacement_offsets(&mut self, offsets_per_mesh: Vec<Vec<f32>>) {
+        for (mesh, offsets) in self.meshes.iter_mut().zip(offsets_per_mesh) {
+            mesh.set_displacement_offsets(offsets);
         }
     }
 
@@ -342,6 +291,7 @@ impl Model for SimpleModel {
 
     fn get_lowest(&self) -> f32 {
         let mut lowest = f32::INFINITY;
+        let bones = self.bone_matrices();
         for (mesh_idx, mesh) in self.meshes.iter().enumerate() {
             let mesh_transform = self
                 .mesh_transforms
@@ -349,10 +299,42 @@ impl Model for SimpleModel {
                 .copied()
                 .unwrap_or_else(|| Matrix4::from_scale(1.0));
             let pos = mesh.positions();
+            let bone_indices = mesh.bone_indices();
+            let bone_weights = mesh.bone_weights();
+            let is_skinned = mesh.is_skinned() && !bones.is_empty();
+
+            let mut vertex_idx = 0usize;
             let mut i = 0;
             while i + 2 < pos.len() {
-                let p = mesh_transform * Vector4::new(pos[i], pos[i + 1], pos[i + 2], 1.0);
+                let local = Vector4::new(pos[i], pos[i + 1], pos[i + 2], 1.0);
+                let skinned = if is_skinned {
+                    let mut blended = Vector4::new(0.0, 0.0, 0.0, 0.0);
+                    let mut has_influence = false;
+                    if let (Some(indices), Some(weights)) =
+                        (bone_indices.get(vertex_idx), bone_weights.get(vertex_idx))
+                    {
+                        for influence in 0..4 {
+                            let bone_idx = indices[influence];
+                            let weight = weights[influence];
+                            if bone_idx >= 0 && weight > 0.0 {
+                                if let Some(bone) = bones.get(bone_idx as usize) {
+                                    blended += *bone * local * weight;
+                                    has_influence = true;
+                                }
+                            }
+                        }
+                    }
+                    if has_influence {
+                        blended
+                    } else {
+                        local
+                    }
+                } else {
+                    local
+                };
+                let p = if is_skinned { skinned } else { mesh_transform * skinned };
                 lowest = lowest.min(p.y);
+                vertex_idx += 1;
                 i += 3;
             }
         }
@@ -367,12 +349,16 @@ impl Model for SimpleModel {
         self.centroid
     }
 
+    fn visual_center(&self) -> Option<Vector3<f32>> {
+        SimpleModel::visual_center(self)
+    }
+
     fn mesh_transform(&self, mesh_idx: usize) -> Option<Matrix4<f32>> {
         self.mesh_transforms.get(mesh_idx).copied()
     }
 
     fn bone_matrices(&self) -> &[Matrix4<f32>] {
-        if self.skeleton.is_some() && self.player.has_clip() {
+        if self.skeleton.is_some() {
             &self.bone_matrices
         } else {
             &[]
@@ -381,8 +367,8 @@ impl Model for SimpleModel {
 
     fn update_animation(&mut self, dt: f32) {
         if let Some(ref mut skel) = self.skeleton {
-            self.player.update(dt);
             self.bone_matrices = self.player.evaluate(skel);
+            self.player.update(dt);
         }
     }
 
