@@ -25,6 +25,10 @@ pub struct ScrambleState {
     pub solution_dir: Vector3<f32>,
     /// Puzzle parameters computed from this model's geometry.
     pub params: PuzzleParams,
+    /// Original vertex positions per mesh (before displacement).
+    pub original_positions: Vec<Vec<f32>>,
+    /// Per-vertex scramble offsets per mesh.
+    pub scramble_offsets: Vec<Vec<f32>>,
 }
 
 /// Analyse the model, choose puzzle parameters, scramble, and return state.
@@ -34,7 +38,6 @@ pub fn scramble(
     target_world_radius: f32,
     fov_radians: f32,
 ) -> ScrambleState {
-    // Compute geometry-aware parameters from the model itself.
     let params = PuzzleParams::from_model(&model.borrow(), target_world_radius, fov_radians);
 
     log::info!(
@@ -47,7 +50,6 @@ pub fn scramble(
         params.max_disp
     );
 
-    // Clamp elevation to ±55° so the solution is never nearly vertical.
     const MAX_ELEV: f32 = 55.0 * PI / 180.0;
     let mut rng = rand::rng();
     let theta: f32 = rng.random_range(0.0..2.0 * PI);
@@ -62,21 +64,56 @@ pub fn scramble(
         solution_dir.z
     );
 
-    let offsets = compute_model_offsets(
+    let original_positions: Vec<Vec<f32>> = model
+        .borrow()
+        .get_meshes()
+        .iter()
+        .map(|m| m.positions().to_vec())
+        .collect();
+    let scramble_offsets = compute_model_offsets(
         &model.borrow(),
         solution_dir,
         params.min_disp,
         params.max_disp,
     );
-    model.borrow_mut().set_displacement_offsets(offsets);
+
+    for (mesh_idx, offsets) in scramble_offsets.iter().enumerate() {
+        let orig = &original_positions[mesh_idx];
+        let displaced: Vec<f32> = orig
+            .iter()
+            .zip(offsets.iter())
+            .map(|(p, o)| p + o)
+            .collect();
+        model.borrow_mut().upload_mesh_positions(mesh_idx, displaced);
+    }
 
     ScrambleState {
         solution_dir,
         params,
+        original_positions,
+        scramble_offsets,
     }
 }
 
 /// Compute per-mesh scramble offsets for a model without touching GPU state.
+/// Apply displacement to a model: positions = original + offset * t for each vertex.
+/// `t = 0.0` = solved (original positions), `t = 1.0` = fully scrambled.
+pub fn apply_displacement(
+    model: &Rc<RefCell<SimpleModel>>,
+    state: &ScrambleState,
+    t: f32,
+) {
+    for (mesh_idx, offsets) in state.scramble_offsets.iter().enumerate() {
+        let orig = &state.original_positions[mesh_idx];
+        let displaced: Vec<f32> = orig
+            .iter()
+            .zip(offsets.iter())
+            .map(|(p, o)| p + o * t)
+            .collect();
+        model.borrow_mut().upload_mesh_positions(mesh_idx, displaced);
+    }
+}
+
 pub fn compute_model_offsets(
     model: &SimpleModel,
     axis: Vector3<f32>,

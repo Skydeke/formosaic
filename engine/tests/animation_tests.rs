@@ -57,7 +57,7 @@ fn bone(name: &str, parent: Option<usize>) -> BoneData {
     BoneData {
         name: name.to_string(),
         bind_local_transform: Matrix4::identity(),
-        offset_matrix: Matrix4::identity(),
+        offset_matrices: vec![Matrix4::identity()],
         parent_index: parent,
     }
 }
@@ -66,9 +66,13 @@ fn bone_with_local(name: &str, parent: Option<usize>, local: Matrix4<f32>) -> Bo
     BoneData {
         name: name.to_string(),
         bind_local_transform: local,
-        offset_matrix: Matrix4::identity(),
+        offset_matrices: vec![Matrix4::identity()],
         parent_index: parent,
     }
+}
+
+fn skel1(bones: Vec<BoneData>) -> Skeleton {
+    Skeleton::new(bones, 1)
 }
 
 fn simple_channel(name: &str) -> BoneChannel {
@@ -340,7 +344,7 @@ fn player_starts_with_no_clip_not_playing() {
 #[test]
 fn player_play_sets_clip_and_playing() {
     let mut p = AnimationPlayer::new();
-    p.play(make_clip());
+        p.play(make_clip(), &[]);
     assert!(p.playing);
     assert!(p.has_clip());
     assert!(
@@ -352,7 +356,7 @@ fn player_play_sets_clip_and_playing() {
 #[test]
 fn player_stop_clears_playing_and_resets_time() {
     let mut p = AnimationPlayer::new();
-    p.play(make_clip());
+    p.play(make_clip(), &[]);
     p.update(1.0);
     p.stop();
     assert!(!p.playing);
@@ -362,7 +366,7 @@ fn player_stop_clears_playing_and_resets_time() {
 #[test]
 fn player_pause_does_not_reset_time() {
     let mut p = AnimationPlayer::new();
-    p.play(make_clip());
+    p.play(make_clip(), &[]);
     p.update(0.5);
     let t = p.local_time_sec;
     p.pause();
@@ -376,7 +380,7 @@ fn player_pause_does_not_reset_time() {
 #[test]
 fn player_resume_after_pause_continues() {
     let mut p = AnimationPlayer::new();
-    p.play(make_clip());
+    p.play(make_clip(), &[]);
     p.update(0.5);
     p.pause();
     p.resume();
@@ -388,7 +392,7 @@ fn player_resume_after_pause_continues() {
 #[test]
 fn player_update_advances_time_when_playing() {
     let mut p = AnimationPlayer::new();
-    p.play(make_clip());
+    p.play(make_clip(), &[]);
     p.update(1.0);
     assert!(p.local_time_sec > 0.0);
 }
@@ -396,7 +400,7 @@ fn player_update_advances_time_when_playing() {
 #[test]
 fn player_update_does_nothing_when_paused() {
     let mut p = AnimationPlayer::new();
-    p.play(make_clip());
+    p.play(make_clip(), &[]);
     p.pause();
     let t_before = p.local_time_sec;
     p.update(1.0);
@@ -409,7 +413,7 @@ fn player_loop_mode_wraps_time() {
     p.loop_mode = LoopMode::Loop;
     let clip = make_clip();
     let duration = clip.duration_seconds();
-    p.play(clip);
+    p.play(clip, &[]);
     // Advance well past the end
     p.update((duration * 3.0) as f32);
     // Time should have wrapped around and stay within [0, duration)
@@ -429,7 +433,7 @@ fn player_once_mode_stops_at_end() {
     p.loop_mode = LoopMode::Once;
     let clip = make_clip();
     let duration = clip.duration_seconds();
-    p.play(clip);
+    p.play(clip, &[]);
     // Advance past the end
     p.update((duration * 2.0) as f32);
     assert!(!p.playing, "Once mode should stop");
@@ -444,11 +448,11 @@ fn player_once_mode_stops_at_end() {
 fn player_speed_scaling_affects_advance_rate() {
     let mut p_normal = AnimationPlayer::new();
     p_normal.speed = 1.0;
-    p_normal.play(make_clip());
+    p_normal.play(make_clip(), &[]);
 
     let mut p_fast = AnimationPlayer::new();
     p_fast.speed = 2.0;
-    p_fast.play(make_clip());
+    p_fast.play(make_clip(), &[]);
 
     p_normal.update(0.5);
     p_fast.update(0.5);
@@ -505,9 +509,9 @@ fn make_local_transform_pure_scale() {
 
 #[test]
 fn compute_final_matrices_single_root_identity() {
-    let mut skel = Skeleton::new(vec![bone("root", None)]);
+    let mut skel = skel1(vec![bone("root", None)]);
     let locals = vec![Matrix4::identity()];
-    let finals = skel.compute_final_matrices(&locals);
+    let finals = skel.compute_final_matrices(&locals, 0);
     assert_eq!(finals.len(), 1);
     assert!(approx_mat4_identity(finals[0]));
 }
@@ -516,11 +520,11 @@ fn compute_final_matrices_single_root_identity() {
 fn compute_final_matrices_single_root_with_offset() {
     let offset = Matrix4::from_translation(Vector3::new(1.0, 0.0, 0.0));
     let mut b = bone("root", None);
-    b.offset_matrix = offset;
-    let mut skel = Skeleton::new(vec![b]);
+    b.offset_matrices[0] = offset;
+    let mut skel = skel1(vec![b]);
 
     let local = Matrix4::identity();
-    let finals = skel.compute_final_matrices(&[local]);
+    let finals = skel.compute_final_matrices(&[local], 0);
     // final = world(=identity) * offset = offset
     let p = finals[0] * Vector4::new(0.0, 0.0, 0.0, 1.0);
     assert!((p.x - 1.0).abs() < 1e-4, "expected offset to be applied");
@@ -533,8 +537,8 @@ fn compute_final_matrices_parent_child_chain() {
     let parent_local = Matrix4::from_translation(Vector3::new(5.0, 0.0, 0.0));
     let child_local = Matrix4::from_translation(Vector3::new(3.0, 0.0, 0.0));
 
-    let mut skel = Skeleton::new(vec![bone("parent", None), bone("child", Some(0))]);
-    let finals = skel.compute_final_matrices(&[parent_local, child_local]);
+    let mut skel = skel1(vec![bone("parent", None), bone("child", Some(0))]);
+    let finals = skel.compute_final_matrices(&[parent_local, child_local], 0);
 
     // Parent final: parent_world * identity_offset = parent_local
     let pp = finals[0] * Vector4::new(0.0, 0.0, 0.0, 1.0);
@@ -565,9 +569,9 @@ fn compute_final_matrices_out_of_order_bones_still_correct() {
         bone("child", Some(1)), // index 0 references parent at index 1
         bone("parent", None),   // index 1 is the root
     ];
-    let mut skel = Skeleton::new(bones);
+    let mut skel = skel1(bones);
     let locals = vec![child_local, parent_local];
-    let finals = skel.compute_final_matrices(&locals);
+    let finals = skel.compute_final_matrices(&locals, 0);
 
     // Parent world = parent_local (index 1)
     let pp = finals[1] * Vector4::new(0.0, 0.0, 0.0, 1.0);
@@ -583,13 +587,13 @@ fn compute_final_matrices_three_level_chain() {
     // grandparent → parent → child, each translating +1 on X.
     // Final child world should be +3 on X (cumulative).
     let tx = Matrix4::from_translation(Vector3::new(1.0, 0.0, 0.0));
-    let mut skel = Skeleton::new(vec![
+    let mut skel = skel1(vec![
         bone("gp", None),
         bone("p", Some(0)),
         bone("c", Some(1)),
     ]);
     let locals = vec![tx, tx, tx];
-    let finals = skel.compute_final_matrices(&locals);
+    let finals = skel.compute_final_matrices(&locals, 0);
 
     let cp = finals[2] * Vector4::new(0.0, 0.0, 0.0, 1.0);
     assert!(
@@ -601,14 +605,14 @@ fn compute_final_matrices_three_level_chain() {
 
 #[test]
 fn compute_final_matrices_result_count_matches_bone_count() {
-    let mut skel = Skeleton::new(vec![
+    let mut skel = skel1(vec![
         bone("a", None),
         bone("b", Some(0)),
         bone("c", Some(0)),
         bone("d", Some(1)),
     ]);
     let locals = vec![Matrix4::identity(); 4];
-    let finals = skel.compute_final_matrices(&locals);
+    let finals = skel.compute_final_matrices(&locals, 0);
     assert_eq!(finals.len(), 4);
 }
 
@@ -616,18 +620,18 @@ fn compute_final_matrices_result_count_matches_bone_count() {
 
 #[test]
 fn compute_final_matrices_ancestor_default_identity() {
-    let mut skel = Skeleton::new(vec![bone("root", None)]);
-    let finals = skel.compute_final_matrices(&[Matrix4::identity()]);
+    let mut skel = skel1(vec![bone("root", None)]);
+    let finals = skel.compute_final_matrices(&[Matrix4::identity()], 0);
     assert!(approx_mat4_identity(finals[0]));
 }
 
 #[test]
 fn compute_final_matrices_ancestor_translation() {
     let ancestor = Matrix4::from_translation(Vector3::new(10.0, 0.0, 0.0));
-    let mut skel = Skeleton::new(vec![bone("root", None)]);
+    let mut skel = skel1(vec![bone("root", None)]);
     skel.root_ancestor_transform = ancestor;
 
-    let finals = skel.compute_final_matrices(&[Matrix4::identity()]);
+    let finals = skel.compute_final_matrices(&[Matrix4::identity()], 0);
     let p = finals[0] * Vector4::new(0.0, 0.0, 0.0, 1.0);
     assert!(
         (p.x - 10.0).abs() < 1e-4,
@@ -642,13 +646,13 @@ fn compute_final_matrices_ancestor_propagates_to_child() {
     let root_local = Matrix4::from_translation(Vector3::new(5.0, 0.0, 0.0));
     let child_local = Matrix4::from_translation(Vector3::new(3.0, 0.0, 0.0));
 
-    let mut skel = Skeleton::new(vec![
+    let mut skel = skel1(vec![
         bone("root", None),
         bone("child", Some(0)),
     ]);
     skel.root_ancestor_transform = ancestor;
 
-    let finals = skel.compute_final_matrices(&[root_local, child_local]);
+    let finals = skel.compute_final_matrices(&[root_local, child_local], 0);
 
     let rp = finals[0] * Vector4::new(0.0, 0.0, 0.0, 1.0);
     assert!(
@@ -670,11 +674,11 @@ fn compute_final_matrices_ancestor_with_offset() {
     let ancestor = Matrix4::from_translation(Vector3::new(10.0, 0.0, 0.0));
     let offset = Matrix4::from_translation(Vector3::new(1.0, 0.0, 0.0));
     let mut b = bone("root", None);
-    b.offset_matrix = offset;
-    let mut skel = Skeleton::new(vec![b]);
+    b.offset_matrices[0] = offset;
+    let mut skel = skel1(vec![b]);
     skel.root_ancestor_transform = ancestor;
 
-    let finals = skel.compute_final_matrices(&[Matrix4::identity()]);
+    let finals = skel.compute_final_matrices(&[Matrix4::identity()], 0);
     let p = finals[0] * Vector4::new(0.0, 0.0, 0.0, 1.0);
     assert!(
         (p.x - 11.0).abs() < 1e-4,
@@ -688,10 +692,10 @@ fn compute_final_matrices_ancestor_scale() {
     let ancestor = Matrix4::from_scale(2.0);
     let root_local = Matrix4::from_translation(Vector3::new(5.0, 0.0, 0.0));
 
-    let mut skel = Skeleton::new(vec![bone("root", None)]);
+    let mut skel = skel1(vec![bone("root", None)]);
     skel.root_ancestor_transform = ancestor;
 
-    let finals = skel.compute_final_matrices(&[root_local]);
+    let finals = skel.compute_final_matrices(&[root_local], 0);
     let p = finals[0] * Vector4::new(0.0, 0.0, 0.0, 1.0);
     assert!(
         (p.x - 10.0).abs() < 1e-4,
@@ -706,12 +710,12 @@ fn compute_final_matrices_ancestor_scale() {
 fn player_evaluate_no_clip_returns_bind_pose_including_ancestor() {
     let ancestor = Matrix4::from_translation(Vector3::new(10.0, 0.0, 0.0));
     let bind_local = Matrix4::from_translation(Vector3::new(5.0, 0.0, 0.0));
-    let mut skel = Skeleton::new(vec![bone_with_local("root", None, bind_local)]);
+    let mut skel = skel1(vec![bone_with_local("root", None, bind_local)]);
     skel.root_ancestor_transform = ancestor;
 
     let player = AnimationPlayer::new();
 
-    let matrices = player.evaluate(&mut skel);
+    let matrices = player.evaluate(&mut skel, 0);
     assert_eq!(matrices.len(), 1);
     let p = matrices[0] * Vector4::new(0.0, 0.0, 0.0, 1.0);
     assert!(
@@ -727,14 +731,14 @@ fn player_evaluate_no_clip_includes_ancestor_in_all_bones() {
     let root_local = Matrix4::from_translation(Vector3::new(3.0, 4.0, 0.0));
     let child_local = Matrix4::from_translation(Vector3::new(1.0, 0.0, 0.0));
 
-    let mut skel = Skeleton::new(vec![
+    let mut skel = skel1(vec![
         bone_with_local("root", None, root_local),
         bone_with_local("child", Some(0), child_local),
     ]);
     skel.root_ancestor_transform = ancestor;
 
     let player = AnimationPlayer::new();
-    let matrices = player.evaluate(&mut skel);
+    let matrices = player.evaluate(&mut skel, 0);
 
     // Root final = ancestor * root_local * offset(identity)
     // = scale(2) * translate(3,4,0)

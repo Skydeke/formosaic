@@ -44,8 +44,10 @@ pub trait Model {
             .unwrap_or(false)
     }
 
-    /// Bone matrices for GPU skinning. Empty means no skinning.
-    fn bone_matrices(&self) -> &[Matrix4<f32>] {
+    /// Bone matrices for GPU skinning for a specific mesh.
+    /// Empty means no skinning.  Different meshes may have different
+    /// inverse bind matrices (different local spaces / node transforms).
+    fn bone_matrices(&self, _mesh_idx: usize) -> &[Matrix4<f32>] {
         &[]
     }
 

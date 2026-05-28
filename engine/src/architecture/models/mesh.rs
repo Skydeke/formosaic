@@ -7,12 +7,10 @@ use crate::{
     rendering::abstracted::renderable::Renderable,
 };
 use cgmath::{InnerSpace, Vector3};
-use std::cell::Cell;
 use std::rc::Rc;
 
 pub struct Mesh {
     positions: Vec<f32>,
-    displacement_offsets: Vec<f32>,
     pos_buffer: Option<Rc<DataBuffer>>,
     vert: Vec<f32>,
     attributes: Vec<Attribute>,
@@ -22,7 +20,6 @@ pub struct Mesh {
     bone_indices: Vec<[i32; 4]>,
     bone_weights: Vec<[f32; 4]>,
     is_skinned: bool,
-    current_displacement_lerp: Cell<f32>,
 }
 
 impl Mesh {
@@ -209,12 +206,10 @@ impl Mesh {
             vao.load_data_buffer(Rc::new(buf), &[Attribute::of(4, 4, DataType::Float, false)]);
         }
 
-        let n = flat_pos.len();
         Self {
-            displacement_offsets: vec![0.0; n],
             positions: flat_pos,
             pos_buffer: Some(pos_buffer),
-            vert: Vec::new(), // populated lazily by from_vao; not needed here
+            vert: Vec::new(),
             attributes: vec![],
             vao,
             material: None,
@@ -222,7 +217,6 @@ impl Mesh {
             bone_indices: flat_bone_indices,
             bone_weights: flat_bone_weights,
             is_skinned: has_bones,
-            current_displacement_lerp: Cell::new(0.0),
         }
     }
 
@@ -230,7 +224,6 @@ impl Mesh {
     pub fn from_vao(vao: Vao) -> Self {
         Self {
             positions: vec![],
-            displacement_offsets: vec![],
             pos_buffer: None,
             vert: vec![],
             attributes: vec![],
@@ -240,38 +233,14 @@ impl Mesh {
             bone_indices: vec![],
             bone_weights: vec![],
             is_skinned: false,
-            current_displacement_lerp: Cell::new(0.0),
         }
     }
 
-    pub fn set_displacement_offsets(&mut self, offsets: Vec<f32>) {
-        if self.pos_buffer.is_none() {
-            log::warn!("[Mesh] set_displacement_offsets on legacy mesh — skipping.");
-            return;
-        }
-        if self.positions.is_empty() {
-            return;
-        }
-        self.displacement_offsets = offsets;
+    pub fn upload_positions(&mut self, positions: Vec<f32>) {
+        self.positions = positions;
         if let Some(buf) = &self.pos_buffer {
-            self.upload_at_t(1.0, buf);
+            buf.store_float_shared(0, &self.positions);
         }
-    }
-
-    pub fn upload_lerp(&self, t: f32) {
-        if let Some(buf) = &self.pos_buffer {
-            self.upload_at_t(t, buf);
-        }
-    }
-
-    fn upload_at_t(&self, t: f32, buf: &Rc<DataBuffer>) {
-        self.current_displacement_lerp.set(t);
-        let n = self.positions.len();
-        let mut data = vec![0.0f32; n];
-        for i in 0..n {
-            data[i] = self.positions[i] + self.displacement_offsets[i] * t;
-        }
-        buf.store_float_shared(0, &data);
     }
 
     pub fn lowest(&self) -> f32 {
@@ -298,12 +267,6 @@ impl Mesh {
 
     pub fn positions(&self) -> &[f32] {
         &self.positions
-    }
-    pub fn displacement_offsets(&self) -> &[f32] {
-        &self.displacement_offsets
-    }
-    pub fn current_displacement_lerp(&self) -> f32 {
-        self.current_displacement_lerp.get()
     }
     pub fn has_vertex_colors(&self) -> bool {
         self.has_vertex_colors

@@ -2,6 +2,7 @@ use cgmath::Matrix4;
 
 use crate::architecture::models::animation::{evaluate_clip, AnimationClip};
 use crate::architecture::models::skeleton::Skeleton;
+use cgmath::Zero;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum LoopMode {
@@ -17,6 +18,12 @@ pub struct AnimationPlayer {
     pub local_time_sec: f64,
     pub loop_mode: LoopMode,
     pub speed: f32,
+    /// Per-mesh from-poses captured on play() for smooth crossfade.
+    pub blend_from: Vec<Vec<Matrix4<f32>>>,
+    /// How far through the blend we are (seconds).
+    pub blend_elapsed: f32,
+    /// Total duration of the blend in seconds.
+    pub blend_duration: f32,
 }
 
 impl AnimationPlayer {
@@ -27,11 +34,17 @@ impl AnimationPlayer {
             local_time_sec: 0.0,
             loop_mode: LoopMode::Loop,
             speed: 1.0,
+            blend_from: Vec::new(),
+            blend_elapsed: 0.0,
+            blend_duration: 0.2,
         }
     }
 
-    /// Start playing a clip from the beginning.
-    pub fn play(&mut self, clip: AnimationClip) {
+    /// Start playing a clip from the beginning, crossfading from `current_matrices`.
+    /// `current_matrices` should be the per-mesh bone matrices currently displayed.
+    pub fn play(&mut self, clip: AnimationClip, current_matrices: &[Vec<Matrix4<f32>>]) {
+        self.blend_from = current_matrices.to_vec();
+        self.blend_elapsed = 0.0;
         self.clip = Some(clip);
         self.local_time_sec = 0.0;
         self.playing = true;
@@ -41,6 +54,7 @@ impl AnimationPlayer {
     pub fn stop(&mut self) {
         self.playing = false;
         self.local_time_sec = 0.0;
+        self.blend_from.clear();
     }
 
     /// Pause without resetting time.
@@ -53,8 +67,26 @@ impl AnimationPlayer {
         self.playing = true;
     }
 
+    fn lerp_matrices(a: &[Matrix4<f32>], b: &[Matrix4<f32>], t: f32) -> Vec<Matrix4<f32>> {
+        a.iter()
+            .zip(b.iter())
+            .map(|(fa, fb)| {
+                let mut m = Matrix4::zero();
+                for c in 0..4 {
+                    for r in 0..4 {
+                        m[c][r] = fa[c][r] + (fb[c][r] - fa[c][r]) * t;
+                    }
+                }
+                m
+            })
+            .collect()
+    }
+
     /// Advance the internal clock by `dt` seconds.
     pub fn update(&mut self, dt: f32) {
+        if self.blend_elapsed < self.blend_duration {
+            self.blend_elapsed = (self.blend_elapsed + dt).min(self.blend_duration);
+        }
         if !self.playing {
             return;
         }
@@ -83,7 +115,8 @@ impl AnimationPlayer {
 
     /// Convert local time to ticks, evaluate the clip, and produce final skinning matrices.
     /// Returns the bone matrices ready for GPU upload.
-    pub fn evaluate(&self, skeleton: &mut Skeleton) -> Vec<Matrix4<f32>> {
+    /// `mesh_index` selects which per-mesh offset matrix to use for each bone.
+    pub fn evaluate(&self, skeleton: &mut Skeleton, mesh_index: usize) -> Vec<Matrix4<f32>> {
         let (clip, time_ticks) = match &self.clip {
             Some(c) => {
                 let ticks = if c.ticks_per_second > 0.0 {
@@ -94,14 +127,14 @@ impl AnimationPlayer {
                 (c, ticks)
             }
             None => {
-                // No clip — return bind-pose matrices (not identity) so that rendering
-                // is correct even before any animation is played.
                 let bind_poses: Vec<Matrix4<f32>> = skeleton
                     .bones
                     .iter()
                     .map(|b| b.bind_local_transform)
                     .collect();
-                return skeleton.compute_final_matrices(&bind_poses).to_vec();
+                return skeleton
+                    .compute_final_matrices(&bind_poses, mesh_index)
+                    .to_vec();
             }
         };
 
@@ -112,7 +145,19 @@ impl AnimationPlayer {
             .map(|b| b.bind_local_transform)
             .collect();
         let local_transforms = evaluate_clip(clip, time_ticks, &bone_names, &bind_local_transforms);
-        let finals = skeleton.compute_final_matrices(&local_transforms).to_vec();
+        let mut finals = skeleton
+            .compute_final_matrices(&local_transforms, mesh_index)
+            .to_vec();
+
+        if self.blend_elapsed < self.blend_duration {
+            if let Some(from) = self.blend_from.get(mesh_index) {
+                if from.len() == finals.len() {
+                    let t = self.blend_elapsed / self.blend_duration;
+                    finals = Self::lerp_matrices(from, &finals, t);
+                }
+            }
+        }
+
         finals
     }
 

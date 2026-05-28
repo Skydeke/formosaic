@@ -68,7 +68,7 @@ use crate::{
         entropy::{best_scramble_axis_from_offsets, difficulty_label, EntropyReport},
         hints::{HintOutput, HintSystem, HintTier},
         puzzle_params::PuzzleParams,
-        scrambler::{compute_model_offsets, make_scrambled_orbit, ScrambleState},
+        scrambler::{apply_displacement, compute_model_offsets, make_scrambled_orbit, ScrambleState},
     },
 };
 
@@ -375,9 +375,19 @@ impl Formosaic {
             m.difficulty = report.difficulty;
         }
 
-        let offsets =
+        let original_positions: Vec<Vec<f32>> = model
+            .borrow()
+            .meshes()
+            .iter()
+            .map(|m| m.positions().to_vec())
+            .collect();
+        let scramble_offsets =
             compute_model_offsets(&model.borrow(), axis, params.min_disp, params.max_disp);
-        model.borrow_mut().set_displacement_offsets(offsets);
+        for (mesh_idx, offsets) in scramble_offsets.iter().enumerate() {
+            let orig = &original_positions[mesh_idx];
+            let displaced: Vec<f32> = orig.iter().zip(offsets.iter()).map(|(p, o)| p + o).collect();
+            model.borrow_mut().upload_mesh_positions(mesh_idx, displaced);
+        }
 
         if let Some(scene) = ctx.scene() {
             let entity = Rc::new(RefCell::new(SimpleEntity::new(model.clone())));
@@ -401,6 +411,8 @@ impl Formosaic {
             self.scramble_state = Some(ScrambleState {
                 solution_dir,
                 params,
+                original_positions,
+                scramble_offsets,
             });
             self.entity = Some(entity.clone());
 
@@ -588,8 +600,12 @@ impl Formosaic {
 
         // Snap the model to solved immediately so the camera target is based on
         // the solved visual center, not the scrambled vertex positions.
-        if let Some(model) = &self.model {
-            model.borrow().upload_lerp(0.0);
+        if let (Some(model), Some(sc)) = (&self.model, &self.scramble_state) {
+            for (mesh_idx, offsets) in sc.scramble_offsets.iter().enumerate() {
+                let orig = &sc.original_positions[mesh_idx];
+                let solved: Vec<f32> = orig.iter().zip(offsets.iter()).map(|(p, _)| *p).collect();
+                model.borrow_mut().upload_mesh_positions(mesh_idx, solved);
+            }
         }
 
         let camera = ctx.camera();
@@ -623,6 +639,37 @@ impl Formosaic {
         }
     }
 
+    fn pick_solve_animation(model: &Rc<RefCell<SimpleModel>>) {
+        let anims = model.borrow().animations().to_vec();
+        if anims.is_empty() {
+            return;
+        }
+        let prefer = [
+            "idle", "interact", "pose", "stand", "celebrat", "victory", "win", "success",
+        ];
+        let avoid = [
+            "run", "walk", "jump", "fall", "hit", "punch", "attack", "roll", "hurt",
+        ];
+        let idx = anims
+            .iter()
+            .enumerate()
+            .filter(|(_, clip)| {
+                let n = clip.name.to_lowercase();
+                !avoid.iter().any(|k| n.contains(k))
+            })
+            .max_by_key(|(_, clip)| {
+                let n = clip.name.to_lowercase();
+                prefer
+                    .iter()
+                    .position(|k| n.contains(k))
+                    .map(|i| 100 - i as i32)
+                    .unwrap_or(0)
+            })
+            .map(|(i, _)| i)
+            .unwrap_or(0);
+        model.borrow_mut().play_animation(idx);
+    }
+
     fn finish_restore(&mut self, ctx: &mut SceneContext) {
         let dist = self.orbit.as_ref().map(|o| o.distance).unwrap_or(3.0);
         let pos = ctx.camera().borrow().transform.position;
@@ -632,7 +679,7 @@ impl Formosaic {
 
         // Play a non-locomotion animation on solve
         if let Some(model) = &self.model {
-            model.borrow_mut().pick_solve_animation();
+            Self::pick_solve_animation(model);
         }
 
         let target = self
@@ -1065,7 +1112,7 @@ impl Application for Formosaic {
             // Apply ghost-snap lerp (Tier 3 hint).
             if output.ghost_lerp > 0.0 {
                 if let Some(model) = &self.model {
-                    model.borrow().upload_lerp(1.0 - output.ghost_lerp);
+                    apply_displacement(model, sc, 1.0 - output.ghost_lerp);
                 }
             }
             Some(output)
@@ -1098,7 +1145,7 @@ impl Application for Formosaic {
                     // Skip during GhostSnap hint (ghost_lerp handles it).
                     if self.hints.tier() != HintTier::GhostSnap {
                         if let Some(model) = &self.model {
-                            model.borrow().upload_lerp(camera_scramble_t(dot));
+                            apply_displacement(model, sc, camera_scramble_t(dot));
                         }
                     }
 

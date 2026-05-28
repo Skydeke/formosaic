@@ -18,7 +18,13 @@ pub struct SimpleModel {
     pub skeleton: Option<Skeleton>,
     pub animations: Vec<AnimationClip>,
     pub player: AnimationPlayer,
-    bone_matrices: Vec<Matrix4<f32>>,
+    /// Per-mesh bone matrices.  Each mesh gets its own set so that meshes
+    /// in different local spaces (different node transforms) use the correct
+    /// per-mesh inverse bind matrices from the skeleton.
+    bone_matrices: Vec<Vec<Matrix4<f32>>>,
+    /// Cached AABB center.  Set whenever bone matrices or vertex positions
+    /// change.  `visual_center()` returns this or falls back to `centroid`.
+    cached_visual_center: Option<Vector3<f32>>,
 }
 
 impl SimpleModel {
@@ -45,7 +51,8 @@ impl SimpleModel {
             skeleton: None,
             animations: Vec::new(),
             player: AnimationPlayer::new(),
-            bone_matrices: Vec::new(),
+            bone_matrices: vec![Vec::new(); mesh_count],
+            cached_visual_center: None,
         })
     }
 
@@ -64,6 +71,7 @@ impl SimpleModel {
             animations: Vec::new(),
             player: AnimationPlayer::new(),
             bone_matrices: Vec::new(),
+            cached_visual_center: None,
         })
     }
 
@@ -86,6 +94,7 @@ impl SimpleModel {
             animations: Vec::new(),
             player: AnimationPlayer::new(),
             bone_matrices: Vec::new(),
+            cached_visual_center: None,
         })
     }
 
@@ -100,56 +109,61 @@ impl SimpleModel {
     ) {
         self.skeleton = skeleton;
         self.animations = animations;
+        self.bone_matrices.resize_with(self.meshes.len(), Vec::new);
         if let Some(ref mut skel) = self.skeleton {
             let bind_poses: Vec<Matrix4<f32>> =
                 skel.bones.iter().map(|b| b.bind_local_transform).collect();
-            self.bone_matrices = skel.compute_final_matrices(&bind_poses).to_vec();
+            for mesh_idx in 0..self.meshes.len() {
+                let mesh_off = mesh_idx.min(skel.mesh_count.saturating_sub(1));
+                self.bone_matrices[mesh_idx] =
+                    skel.compute_final_matrices(&bind_poses, mesh_off).to_vec();
+            }
         } else {
-            self.bone_matrices = Vec::new();
+            for bm in &mut self.bone_matrices {
+                bm.clear();
+            }
         }
+        self.refresh_visual_center();
     }
 
     pub fn update_animation(&mut self, dt: f32) {
         if let Some(ref mut skel) = self.skeleton {
-            self.bone_matrices = self.player.evaluate(skel);
+            for mesh_idx in 0..self.meshes.len() {
+                let mesh_off = mesh_idx.min(skel.mesh_count.saturating_sub(1));
+                self.bone_matrices[mesh_idx] = self.player.evaluate(skel, mesh_off);
+            }
             self.player.update(dt);
         }
+        self.refresh_visual_center();
     }
 
-    pub fn bone_matrices(&self) -> &[Matrix4<f32>] {
+    pub fn bone_matrices_for_mesh(&self, mesh_idx: usize) -> &[Matrix4<f32>] {
         if self.skeleton.is_some() {
-            &self.bone_matrices
+            self.bone_matrices.get(mesh_idx).map_or(&[], |b| b.as_slice())
         } else {
             &[]
         }
     }
 
-    pub fn visual_center(&self) -> Option<Vector3<f32>> {
+    fn refresh_visual_center(&mut self) {
         let mut min = Vector3::new(f32::INFINITY, f32::INFINITY, f32::INFINITY);
         let mut max = Vector3::new(f32::NEG_INFINITY, f32::NEG_INFINITY, f32::NEG_INFINITY);
-        let bones = self.bone_matrices();
 
         for (mesh_idx, mesh) in self.meshes.iter().enumerate() {
+            let bones = self.bone_matrices_for_mesh(mesh_idx);
             let mesh_transform = self
                 .mesh_transforms
                 .get(mesh_idx)
                 .copied()
                 .unwrap_or_else(|| Matrix4::from_scale(1.0));
             let pos = mesh.positions();
-            let offsets = mesh.displacement_offsets();
-            let displacement_t = mesh.current_displacement_lerp();
             let bone_indices = mesh.bone_indices();
             let bone_weights = mesh.bone_weights();
 
             let mut vertex_idx = 0usize;
             let mut i = 0usize;
             while i + 2 < pos.len() {
-                let local = Vector4::new(
-                    pos[i] + offsets.get(i).copied().unwrap_or(0.0) * displacement_t,
-                    pos[i + 1] + offsets.get(i + 1).copied().unwrap_or(0.0) * displacement_t,
-                    pos[i + 2] + offsets.get(i + 2).copied().unwrap_or(0.0) * displacement_t,
-                    1.0,
-                );
+                let local = Vector4::new(pos[i], pos[i + 1], pos[i + 2], 1.0);
 
                 let skinned = if !bones.is_empty() {
                     let mut blended = Vector4::new(0.0, 0.0, 0.0, 0.0);
@@ -157,12 +171,13 @@ impl SimpleModel {
                     if let (Some(indices), Some(weights)) =
                         (bone_indices.get(vertex_idx), bone_weights.get(vertex_idx))
                     {
-                        for influence in 0..4 {
-                            let bone_idx = indices[influence];
-                            let weight = weights[influence];
-                            if bone_idx >= 0 && weight > 0.0 {
-                                if let Some(bone) = bones.get(bone_idx as usize) {
-                                    blended += *bone * local * weight;
+                        for j in 0..4 {
+                            let bi = indices[j];
+                            if bi >= 0 {
+                                let weight = weights[j];
+                                let bi = bi as usize;
+                                if bi < bones.len() {
+                                    blended += bones[bi] * local * weight;
                                     has_influence = true;
                                 }
                             }
@@ -174,14 +189,10 @@ impl SimpleModel {
                         local
                     }
                 } else {
-                    local
+                    mesh_transform * local
                 };
 
-                let p = if mesh.is_skinned() && !bones.is_empty() {
-                    skinned
-                } else {
-                    mesh_transform * skinned
-                };
+                let p = Vector3::new(skinned.x, skinned.y, skinned.z);
                 min.x = min.x.min(p.x);
                 min.y = min.y.min(p.y);
                 min.z = min.z.min(p.z);
@@ -194,69 +205,38 @@ impl SimpleModel {
             }
         }
 
-        if min.x == f32::INFINITY {
+        self.cached_visual_center = if min.x == f32::INFINITY {
             self.centroid
         } else {
             Some((min + max) * 0.5)
-        }
+        };
+    }
+
+    pub fn visual_center(&self) -> Option<Vector3<f32>> {
+        self.cached_visual_center.or(self.centroid)
     }
 
     pub fn animations(&self) -> &[AnimationClip] {
         &self.animations
     }
 
-    pub fn pick_solve_animation(&mut self) {
-        if self.animations.is_empty() {
+    pub fn upload_mesh_positions(&mut self, mesh_idx: usize, positions: Vec<f32>) {
+        if let Some(mesh) = self.meshes.get_mut(mesh_idx) {
+            mesh.upload_positions(positions);
+        }
+    }
+
+    pub fn play_animation(&mut self, index: usize) {
+        if index >= self.animations.len() {
             return;
         }
-
-        let prefer = [
-            "idle", "interact", "pose", "stand", "celebrat", "victory", "win", "success",
-        ];
-        let avoid = [
-            "run", "walk", "jump", "fall", "hit", "punch", "attack", "roll", "hurt",
-        ];
-
-        let chosen = self
-            .animations
-            .iter()
-            .enumerate()
-            .filter(|(_, clip)| {
-                let n = clip.name.to_lowercase();
-                !avoid.iter().any(|k| n.contains(k))
-            })
-            .max_by_key(|(_, clip)| {
-                let n = clip.name.to_lowercase();
-                prefer
-                    .iter()
-                    .position(|k| n.contains(k))
-                    .map(|i| 100 - i as i32)
-                    .unwrap_or(0)
-            })
-            .map(|(idx, clip)| (idx, clip.clone()))
-            .or_else(|| self.animations.first().cloned().map(|clip| (0, clip)));
-
-        let Some((_idx, clip)) = chosen else {
-            return;
-        };
-
-        self.player.play(clip);
-
-        // Immediately evaluate so bone_matrices reflect the first frame.
+        let clip = self.animations[index].clone();
+        self.player.play(clip, &self.bone_matrices);
         if let Some(ref mut skel) = self.skeleton {
-            self.bone_matrices = self.player.evaluate(skel);
-        }
-    }
-
-    pub fn set_displacement_offsets(&mut self, offsets_per_mesh: Vec<Vec<f32>>) {
-        for (mesh, offsets) in self.meshes.iter_mut().zip(offsets_per_mesh) {
-            mesh.set_displacement_offsets(offsets);
-        }
-    }
-
-    pub fn upload_lerp(&self, t: f32) {
-        for mesh in &self.meshes {
-            mesh.upload_lerp(t);
+            for mesh_idx in 0..self.meshes.len() {
+                let mesh_off = mesh_idx.min(skel.mesh_count.saturating_sub(1));
+                self.bone_matrices[mesh_idx] = self.player.evaluate(skel, mesh_off);
+            }
         }
     }
 
@@ -291,8 +271,8 @@ impl Model for SimpleModel {
 
     fn get_lowest(&self) -> f32 {
         let mut lowest = f32::INFINITY;
-        let bones = self.bone_matrices();
         for (mesh_idx, mesh) in self.meshes.iter().enumerate() {
+            let bones = self.bone_matrices_for_mesh(mesh_idx);
             let mesh_transform = self
                 .mesh_transforms
                 .get(mesh_idx)
@@ -357,19 +337,19 @@ impl Model for SimpleModel {
         self.mesh_transforms.get(mesh_idx).copied()
     }
 
-    fn bone_matrices(&self) -> &[Matrix4<f32>] {
-        if self.skeleton.is_some() {
-            &self.bone_matrices
-        } else {
-            &[]
-        }
+    fn bone_matrices(&self, mesh_idx: usize) -> &[Matrix4<f32>] {
+        self.bone_matrices_for_mesh(mesh_idx)
     }
 
     fn update_animation(&mut self, dt: f32) {
         if let Some(ref mut skel) = self.skeleton {
-            self.bone_matrices = self.player.evaluate(skel);
+            for mesh_idx in 0..self.meshes.len() {
+                let mesh_off = mesh_idx.min(skel.mesh_count.saturating_sub(1));
+                self.bone_matrices[mesh_idx] = self.player.evaluate(skel, mesh_off);
+            }
             self.player.update(dt);
         }
+        self.refresh_visual_center();
     }
 
     fn animations(&self) -> &[AnimationClip] {

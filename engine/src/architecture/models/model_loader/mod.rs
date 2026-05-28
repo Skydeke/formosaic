@@ -164,15 +164,25 @@ impl ModelLoader {
         })
     }
 
-    fn build_skeleton(scene: &Scene, _prepared_meshes: &[PreparedMesh]) -> Option<Skeleton> {
+    fn build_skeleton(scene: &Scene, prepared_meshes: &[PreparedMesh]) -> Option<Skeleton> {
+        // Collect ALL bones across ALL meshes.  Different meshes may have
+        // different offset matrices for the same bone (because they are in
+        // different local spaces / node transforms).  We store every offset
+        // so each mesh uses the correct one.
         let mut bone_names_ordered: Vec<String> = Vec::new();
-        let mut bone_offsets: HashMap<String, Matrix4<f32>> = HashMap::new();
-        for ai_mesh in &scene.meshes {
+        // Per-bone: one offset per mesh (indexed by mesh_idx).
+        // Initialised to None; set to Some for meshes that reference the bone.
+        let mut bone_offsets: HashMap<String, Vec<Option<Matrix4<f32>>>> = HashMap::new();
+        let mesh_count = scene.meshes.len();
+        for (mesh_idx, ai_mesh) in scene.meshes.iter().enumerate() {
             for bone in &ai_mesh.bones {
                 let name = bone.name.clone();
                 if !bone_offsets.contains_key(&name) {
                     bone_names_ordered.push(name.clone());
-                    bone_offsets.insert(name, Self::ai_matrix_to_cg(&bone.offset_matrix));
+                    bone_offsets.insert(name.clone(), vec![None; mesh_count]);
+                }
+                if let Some(slot) = bone_offsets.get_mut(&name) {
+                    slot[mesh_idx] = Some(Self::ai_matrix_to_cg(&bone.offset_matrix));
                 }
             }
         }
@@ -219,7 +229,12 @@ impl ModelLoader {
 
         let mut bone_data_vec: Vec<BoneData> = Vec::with_capacity(bone_names_ordered.len());
         for bone_name in &bone_names_ordered {
-            let offset = bone_offsets[bone_name.as_str()];
+            let offsets = &bone_offsets[bone_name.as_str()];
+            // Unwrap each per-mesh slot (every bone should have at least one mesh referencing it)
+            let offset_matrices: Vec<Matrix4<f32>> = offsets
+                .iter()
+                .map(|o| o.unwrap_or_else(|| Matrix4::identity()))
+                .collect();
             let bind_local_transform = if let Some(root) = &scene.root {
                 find_bind_local(root, bone_name).unwrap_or_else(|| Matrix4::identity())
             } else {
@@ -233,7 +248,7 @@ impl ModelLoader {
             bone_data_vec.push(BoneData {
                 name: bone_name.clone(),
                 bind_local_transform,
-                offset_matrix: offset,
+                offset_matrices,
                 parent_index,
             });
         }
@@ -266,7 +281,7 @@ impl ModelLoader {
                 .as_ref()
                 .and_then(|root| find_root_ancestor(root, first_bone, Matrix4::identity()))
         });
-        let mut skel = Skeleton::new(bone_data_vec);
+        let mut skel = Skeleton::new(bone_data_vec, mesh_count);
         if let Some(t) = ancestor {
             skel.root_ancestor_transform = t;
         }

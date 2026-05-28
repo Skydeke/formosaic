@@ -70,7 +70,7 @@ pub struct AxisSearchResult {
 /// Analyse how good `axis` is as a Formosaic puzzle solution axis for `model`.
 ///
 /// `offsets_flat` is the flat list of per-vertex displacement offsets
-/// as stored in `Mesh::displacement_offsets` (3 floats per vertex, triangle order).
+/// as stored per-vertex in the game's scramble offsets (3 floats per vertex, triangle order).
 pub fn analyse_axis(scramble_offsets_flat: &[f32], axis: Vector3<f32>) -> EntropyReport {
     let directions = fibonacci_sphere(64);
     let scores: Vec<f32> = directions

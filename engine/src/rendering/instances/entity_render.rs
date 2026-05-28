@@ -223,7 +223,7 @@ impl<T: SceneObject + 'static> IRenderer for EntityRenderer<T> {
                             .mesh_transform(i)
                             .unwrap_or_else(|| Matrix4::from_scale(1.0));
                         let bone_matrices = if is_skinned {
-                            model_ref.bone_matrices().to_vec()
+                            model_ref.bone_matrices(i).to_vec()
                         } else {
                             Vec::new()
                         };
