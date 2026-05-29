@@ -3,10 +3,6 @@
 
 - Better Main menu
 
-- State saftety, disable buttons while loading level
-
-- Fetch random should not pick levels we already have downloaded.
-
 - Can we make better use of the sceneraph instead of collecting lists to render?
 
 - Better Event system (integrated with the statemachine)
@@ -18,3 +14,7 @@
 - Level says 1 hint ingame even if none was used.
 
 - Computer Model's texture is more gray in my game, when it should be closer to black
+
+- stylized Charcater rendered wrong android
+- Character Soldier, wrong transforms?
+- Animated Plattformer Character, wrong transforms

@@ -41,7 +41,7 @@ pub fn register(scene: &Scenegraph, state: Rc<RefCell<UiState>>) {
                 }
             });
 
-        if !s.is_touch {
+        if !s.is_touch && !s.is_loading {
             ui.window("##keyinfo")
                 .flags(util::hud_flags())
                 .position([w * 0.5, h - scale.pad_w()], Condition::Always)

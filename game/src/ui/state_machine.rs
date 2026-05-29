@@ -93,7 +93,9 @@ impl UiStateMachine {
                     }
                 }
                 UiInput::EscapePressed | UiInput::MenuPressed => {
-                    if ctx.is_solved {
+                    if ctx.is_loading {
+                        Vec::new()
+                    } else if ctx.is_solved {
                         self.screen = UiScreen::Credits;
                         vec![UiTransition::ShowCredits]
                     } else {

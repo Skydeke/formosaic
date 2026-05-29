@@ -8,7 +8,7 @@ use std::{cell::RefCell, rc::Rc};
 pub fn register(scene: &Scenegraph, state: Rc<RefCell<UiState>>) {
     let touch = UiNode::new("touch_buttons", move |ui, w, h, ctx| {
         let s = state.borrow();
-        if s.screen != UiScreen::Game {
+        if s.screen != UiScreen::Game || s.is_loading {
             return;
         }
         let scale = Scale::from_screen(w, h, s.is_touch);

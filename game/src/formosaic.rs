@@ -1240,8 +1240,17 @@ impl Application for Formosaic {
     fn on_event(&mut self, event: &Event, ctx: &mut SceneContext) {
         match event {
             Event::KeyDown { key: Key::H } => {
-                // Hints are meaningless after solve — ignore.
-                if !matches!(self.game_state, GameState::Solved | GameState::Restoring { .. }) {
+                // Hints are meaningless during loading or after solve.
+                let is_loading = matches!(
+                    self.mode,
+                    AppMode::Loading { .. }
+                        | AppMode::Building { .. }
+                        | AppMode::Downloading { .. }
+                        | AppMode::FetchingOnline
+                );
+                if !is_loading
+                    && !matches!(self.game_state, GameState::Solved | GameState::Restoring { .. })
+                {
                     self.hints.advance();
                     log::info!("[Formosaic] Hint → {:?}", self.hints.tier());
                 }
