@@ -133,7 +133,7 @@ fn scene_context_defaults() {
     let ctx = formosaic_engine::architecture::scene::scene_context::SceneContext::new();
     assert_eq!(ctx.solved_timer, None);
     assert!(!ctx.show_menu);
-    assert!(!ctx.is_touch);
+    assert!(!ctx.platform.is_touch());
     assert!((ctx.delta_time - 0.0).abs() < 1e-6);
     assert!(ctx.hints.is_none());
     assert!(ctx.scene().is_some());
@@ -233,11 +233,10 @@ fn scene_context_menu_flag_toggles() {
 }
 
 #[test]
-fn scene_context_touch_flag_toggles() {
-    let mut ctx = formosaic_engine::architecture::scene::scene_context::SceneContext::new();
-    assert!(!ctx.is_touch);
-    ctx.is_touch = true;
-    assert!(ctx.is_touch);
+fn scene_context_platform_detected() {
+    let ctx = formosaic_engine::architecture::scene::scene_context::SceneContext::new();
+    let detected = cfg!(target_os = "android");
+    assert_eq!(ctx.platform.is_touch(), detected);
 }
 
 #[test]

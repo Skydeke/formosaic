@@ -28,6 +28,18 @@ pub enum UiTransition {
     OpenArtistLink(String),
 }
 
+/// Context passed to the state machine for guard evaluation.
+/// This is the single source of truth for UI-guard conditions.
+#[derive(Debug, Clone, Default)]
+pub struct UiContext {
+    /// Whether the current puzzle has been solved.
+    pub is_solved: bool,
+    /// Whether a level download is in progress.
+    pub is_downloading: bool,
+    /// Whether a level is being loaded/built.
+    pub is_loading: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct UiStateMachine {
     screen: UiScreen,
@@ -44,21 +56,41 @@ impl UiStateMachine {
         self.screen
     }
 
-    pub fn handle(&mut self, input: UiInput, solved: bool) -> Vec<UiTransition> {
+    /// Handle a UI input event, applying guard conditions from `ctx`.
+    /// Returns the list of transitions to execute on the game layer.
+    pub fn handle(&mut self, input: UiInput, ctx: &UiContext) -> Vec<UiTransition> {
         match self.screen {
             UiScreen::MainMenu => match input {
                 UiInput::PlayLevel(id) => {
                     self.screen = UiScreen::Game;
                     vec![UiTransition::StartLevel(id)]
                 }
-                UiInput::FetchOnline => vec![UiTransition::FetchOnline],
-                UiInput::RandomSaved => vec![UiTransition::RandomSaved],
+                UiInput::FetchOnline => {
+                    if !ctx.is_downloading && !ctx.is_loading {
+                        vec![UiTransition::FetchOnline]
+                    } else {
+                        Vec::new()
+                    }
+                }
+                UiInput::RandomSaved => {
+                    if !ctx.is_downloading && !ctx.is_loading {
+                        vec![UiTransition::RandomSaved]
+                    } else {
+                        Vec::new()
+                    }
+                }
                 _ => Vec::new(),
             },
             UiScreen::Game => match input {
-                UiInput::Hint => vec![UiTransition::AdvanceHint],
+                UiInput::Hint => {
+                    if !ctx.is_loading {
+                        vec![UiTransition::AdvanceHint]
+                    } else {
+                        Vec::new()
+                    }
+                }
                 UiInput::EscapePressed | UiInput::MenuPressed => {
-                    if solved {
+                    if ctx.is_solved {
                         self.screen = UiScreen::Credits;
                         vec![UiTransition::ShowCredits]
                     } else {

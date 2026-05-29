@@ -273,14 +273,17 @@ impl<A: Application + 'static> ApplicationHandler for GameEngine<A> {
 
                         // Let the imgui renderer run its new-frame + UiNode collection.
                         // It owns imgui::Context so DrawData lifetime is fully contained.
+                        //
+                        // NOTE: UI actions pushed by callbacks during prepare() are NOT
+                        // processed until the NEXT frame's on_update(). This ensures that
+                        // scene transitions (credits, menus) take effect *before* the
+                        // imgui frame is built, so they render on the first visible frame.
                         let scale = window.scale_factor() as f32;
                         if let Some(pipeline) = &mut self.pipeline {
                             if let Some(imgui_r) = pipeline.imgui_renderer_mut() {
                                 imgui_r.prepare(window, pw, ph, scale, &mut sc);
                             }
                         }
-
-                        app.handle_ui_actions(&mut sc);
                     }
 
                     self.pipeline
@@ -394,39 +397,46 @@ impl<A: Application + 'static> ApplicationHandler for GameEngine<A> {
 
             WindowEvent::Touch(touch) => {
                 if let (Some(app), Some(window)) = (&mut self.app, &self.window) {
-                    let size = window.inner_size();
-                    let tx = touch.location.x as f32;
-                    let ty = touch.location.y as f32;
-                    let tw = size.width as f32;
-                    let th = size.height as f32;
-                    let sc_rc = self.scene_context.clone().expect("no scene context");
+                    let wants_mouse = self
+                        .pipeline
+                        .as_ref()
+                        .and_then(|p| p.imgui_renderer())
+                        .map(|r| r.wants_mouse())
+                        .unwrap_or(false);
+                    if !wants_mouse {
+                        let size = window.inner_size();
+                        let tx = touch.location.x as f32;
+                        let ty = touch.location.y as f32;
+                        let tw = size.width as f32;
+                        let th = size.height as f32;
+                        let sc_rc = self.scene_context.clone().expect("no scene context");
 
-                    match touch.phase {
-                        winit::event::TouchPhase::Started => app.on_event(
-                            &EngineEvent::TouchDown {
-                                id: touch.id,
-                                x: tx,
-                                y: ty,
-                                width: tw,
-                                height: th,
-                            },
-                            &mut sc_rc.borrow_mut(),
-                        ),
-                        winit::event::TouchPhase::Moved => app.on_event(
-                            &EngineEvent::TouchMove {
-                                id: touch.id,
-                                x: tx,
-                                y: ty,
-                                width: tw,
-                                height: th,
-                            },
-                            &mut sc_rc.borrow_mut(),
-                        ),
-                        winit::event::TouchPhase::Ended | winit::event::TouchPhase::Cancelled => {
-                            app.on_event(
+                        match touch.phase {
+                            winit::event::TouchPhase::Started => app.on_event(
+                                &EngineEvent::TouchDown {
+                                    id: touch.id,
+                                    x: tx,
+                                    y: ty,
+                                    width: tw,
+                                    height: th,
+                                },
+                                &mut sc_rc.borrow_mut(),
+                            ),
+                            winit::event::TouchPhase::Moved => app.on_event(
+                                &EngineEvent::TouchMove {
+                                    id: touch.id,
+                                    x: tx,
+                                    y: ty,
+                                    width: tw,
+                                    height: th,
+                                },
+                                &mut sc_rc.borrow_mut(),
+                            ),
+                            winit::event::TouchPhase::Ended
+                            | winit::event::TouchPhase::Cancelled => app.on_event(
                                 &EngineEvent::TouchUp { id: touch.id },
                                 &mut sc_rc.borrow_mut(),
-                            )
+                            ),
                         }
                     }
                 }

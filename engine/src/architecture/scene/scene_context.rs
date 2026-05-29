@@ -6,6 +6,7 @@ use std::rc::Rc;
 use crate::{
     architecture::scene::node::scenegraph::Scenegraph,
     opengl::objects::clip_plane::ClipPlane,
+    platform::PlatformInfo,
     rendering::{
         instances::camera::camera::Camera,
         render_output_data::RenderOutputData,
@@ -28,8 +29,8 @@ pub struct SceneContext {
     pub solved_timer: Option<f32>,
     /// Whether the menu overlay is currently showing.
     pub show_menu: bool,
-    /// Whether the platform is touch-only (Android).
-    pub is_touch: bool,
+    /// Platform information (touch vs desktop, UI scale, etc.).
+    pub platform: PlatformInfo,
     /// Frame delta time in seconds.
     pub delta_time: f32,
 
@@ -48,7 +49,7 @@ impl SceneContext {
             hints: None,
             solved_timer: None,
             show_menu: false,
-            is_touch: false,
+            platform: PlatformInfo::detect(),
             delta_time: 0.0,
             ui_actions: Vec::new(),
         }

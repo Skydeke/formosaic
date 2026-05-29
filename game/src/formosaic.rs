@@ -53,11 +53,12 @@ use formosaic_engine::{
         },
     },
     input::{Event, Key},
+    platform::PlatformInfo,
     rendering::{instances::camera::orbit_controller::OrbitController, render_state::LightConfig},
 };
 use imgui;
 
-use crate::ui::state_machine::{UiInput, UiScreen, UiStateMachine, UiTransition};
+use crate::ui::state_machine::{UiContext, UiInput, UiScreen, UiStateMachine, UiTransition};
 
 use crate::{
     level::{
@@ -440,7 +441,7 @@ impl Formosaic {
         self.ui_machine = UiStateMachine::new();
         let _ = self
             .ui_machine
-            .handle(UiInput::PlayLevel(level_id.clone()), false);
+            .handle(UiInput::PlayLevel(level_id.clone()), &UiContext::default());
         self.level_start = Some(Instant::now());
         self.elapsed_secs = 0.0;
         self.mode = AppMode::InGame { level_id };
@@ -996,6 +997,7 @@ impl Formosaic {
             }
         }
     }
+
 }
 impl Default for Formosaic {
     fn default() -> Self {
@@ -1211,13 +1213,18 @@ impl Application for Formosaic {
                 self.fetch_online_level();
             }
             Event::KeyDown { key: Key::Escape } => {
-                let inputs = self
-                    .ui_machine
-                    .handle(UiInput::EscapePressed, self.game_state == GameState::Solved);
+                let ui_ctx = UiContext {
+                    is_solved: self.game_state == GameState::Solved,
+                    is_downloading: self.is_downloading(),
+                    is_loading: self.is_in_menu(),
+                };
+                let inputs = self.ui_machine.handle(UiInput::EscapePressed, &ui_ctx);
                 self.apply_ui_transitions(inputs, ctx);
             }
             _ => {
-                if matches!(self.game_state, GameState::Playing | GameState::Solved) {
+                if self.ui_machine.screen() == UiScreen::Game
+                    && matches!(self.game_state, GameState::Playing | GameState::Solved)
+                {
                     let camera = ctx.camera();
                     let (w, h) = {
                         let c = camera.borrow();
@@ -1230,10 +1237,13 @@ impl Application for Formosaic {
     }
 
     fn handle_ui_actions(&mut self, ctx: &mut SceneContext) {
+        let ui_ctx = UiContext {
+            is_solved: self.game_state == GameState::Solved,
+            is_downloading: self.is_downloading(),
+            is_loading: self.is_in_menu(),
+        };
         for input in ctx.drain_ui_actions::<UiInput>() {
-            let transitions = self
-                .ui_machine
-                .handle(input, self.game_state == GameState::Solved);
+            let transitions = self.ui_machine.handle(input, &ui_ctx);
             self.apply_ui_transitions(transitions, ctx);
         }
     }
@@ -1243,7 +1253,7 @@ impl Application for Formosaic {
         let solved = self.game_state == GameState::Solved && !self.is_in_menu();
         let solved_t = self.solved_timer;
         ctx.lights = self.scene_lights;
-        ctx.is_touch = cfg!(target_os = "android");
+        ctx.platform = PlatformInfo::detect().with_ui_scale(1.0);
         ctx.delta_time = delta_time;
         ctx.show_menu = self.ui_machine.screen() == UiScreen::MainMenu;
         ctx.solved_timer = if solved { Some(solved_t) } else { None };
@@ -1315,7 +1325,7 @@ impl Application for Formosaic {
             self.loading_progress = progress.clamp(0.0, 1.0);
             ui.download_progress = Some(self.loading_progress);
             ui.screen = self.ui_machine.screen();
-            ui.is_touch = cfg!(target_os = "android");
+            ui.is_touch = PlatformInfo::detect().is_touch();
             ui.levels.clone_from(&self.registry.levels);
             ui.current_level = match &self.mode {
                 AppMode::InGame { level_id }
