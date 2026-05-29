@@ -197,6 +197,33 @@ impl ModelLoader {
             .map(|(i, n)| (n.as_str(), i))
             .collect();
 
+        fn find_armature_root(
+            node: &Rc<russimp_ng::node::Node>,
+            bone_name: &str,
+        ) -> Option<Rc<russimp_ng::node::Node>> {
+            for child in node.children.borrow().iter() {
+                if child.name == bone_name {
+                    return Some(node.clone());
+                }
+            }
+            for child in node.children.borrow().iter() {
+                if let Some(found) = find_armature_root(child, bone_name) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+
+        let armature_root: Option<Rc<russimp_ng::node::Node>> = bone_names_ordered
+            .first()
+            .and_then(|first_bone| {
+                scene
+                    .root
+                    .as_ref()
+                    .and_then(|root| find_armature_root(root, first_bone))
+            });
+        let search_root = armature_root.as_ref().or_else(|| scene.root.as_ref());
+
         fn find_parent(
             node: &russimp_ng::node::Node,
             bone_name: &str,
@@ -235,12 +262,12 @@ impl ModelLoader {
                 .iter()
                 .map(|o| o.unwrap_or_else(|| Matrix4::identity()))
                 .collect();
-            let bind_local_transform = if let Some(root) = &scene.root {
+            let bind_local_transform = if let Some(root) = search_root {
                 find_bind_local(root, bone_name).unwrap_or_else(|| Matrix4::identity())
             } else {
                 Matrix4::identity()
             };
-            let parent_index = if let Some(root) = &scene.root {
+            let parent_index = if let Some(root) = search_root {
                 find_parent(root, bone_name, &name_to_idx)
             } else {
                 None
@@ -729,5 +756,104 @@ impl ModelLoader {
             log::warn!("[ModelLoader] failed to convert {:?} texture", ty);
         }
         result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use russimp_ng::Matrix4x4;
+
+    fn identity4() -> Matrix4x4 {
+        Matrix4x4 {
+            a1: 1.0, a2: 0.0, a3: 0.0, a4: 0.0,
+            b1: 0.0, b2: 1.0, b3: 0.0, b4: 0.0,
+            c1: 0.0, c2: 0.0, c3: 1.0, c4: 0.0,
+            d1: 0.0, d2: 0.0, d3: 0.0, d4: 1.0,
+        }
+    }
+
+    fn scale999() -> Matrix4x4 {
+        Matrix4x4 {
+            a1: 999.0, a2: 0.0, a3: 0.0, a4: 0.0,
+            b1: 0.0, b2: 999.0, b3: 0.0, b4: 0.0,
+            c1: 0.0, c2: 0.0, c3: 999.0, c4: 0.0,
+            d1: 0.0, d2: 0.0, d3: 0.0, d4: 1.0,
+        }
+    }
+
+    fn node(name: &str, xform: Matrix4x4) -> Rc<russimp_ng::node::Node> {
+        Rc::new(russimp_ng::node::Node {
+            name: name.to_string(),
+            children: RefCell::new(Vec::new()),
+            meshes: Vec::new(),
+            metadata: None,
+            transformation: xform,
+            parent: std::rc::Weak::new(),
+        })
+    }
+
+    fn bone(name: &str) -> russimp_ng::bone::Bone {
+        russimp_ng::bone::Bone {
+            name: name.to_string(),
+            offset_matrix: identity4(),
+            weights: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn build_skeleton_avoids_name_collision_with_mesh_nodes() {
+        let root = node("RootNode", identity4());
+        let armature = node("CharacterArmature", identity4());
+        let bone_root = node("Root", identity4());
+        let bone_body = node("Body", identity4());
+        let mesh_body = node("Body", scale999());
+        let mesh_head = node("Head", identity4());
+
+        bone_root.children.borrow_mut().push(bone_body.clone());
+        armature.children.borrow_mut().push(bone_root.clone());
+        root.children.borrow_mut().push(armature.clone());
+        root.children.borrow_mut().push(mesh_body.clone());
+        root.children.borrow_mut().push(mesh_head.clone());
+
+        let scene = russimp_ng::scene::Scene {
+            root: Some(root),
+            meshes: vec![
+                russimp_ng::mesh::Mesh {
+                    name: "TestMesh".into(),
+                    bones: vec![bone("Root"), bone("Body")],
+                    ..Default::default()
+                },
+            ],
+            materials: Vec::new(),
+            animations: Vec::new(),
+            cameras: Vec::new(),
+            lights: Vec::new(),
+            metadata: None,
+            flags: 0,
+        };
+
+        let skel = ModelLoader::build_skeleton(&scene, &[]).unwrap();
+
+        let root_idx = skel.bones.iter().position(|b| b.name == "Root").unwrap();
+        let body_idx = skel.bones.iter().position(|b| b.name == "Body").unwrap();
+
+        assert_eq!(
+            skel.bones[body_idx].parent_index,
+            Some(root_idx),
+            "Body bone parent should be Root (armature subtree search)"
+        );
+        assert_eq!(
+            skel.bones[root_idx].parent_index,
+            None,
+            "Root bone should have no parent"
+        );
+
+        let body_transform = skel.bones[body_idx].bind_local_transform;
+        assert!(
+            (body_transform.x.x - 1.0).abs() < 1e-5,
+            "Body bind_local_transform should be identity (from bone), not scale=999 (from mesh node). Got x.x={}",
+            body_transform.x.x
+        );
     }
 }

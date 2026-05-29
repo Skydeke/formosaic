@@ -17,4 +17,5 @@
 
 - stylized Charcater rendered wrong android
 - Character Soldier, wrong transforms?
-- Animated Plattformer Character, wrong transforms
+
+- replicate default scroll behavior on android

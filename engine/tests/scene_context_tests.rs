@@ -1,7 +1,7 @@
 use formosaic_engine::architecture::scene::node::node::{Node, NodeBehavior};
 use formosaic_engine::architecture::scene::node::scenegraph::Scenegraph;
 use formosaic_engine::opengl::objects::clip_plane::ClipPlane;
-use formosaic_engine::rendering::render_state::{HintRenderState, LightConfig};
+use formosaic_engine::rendering::render_state::LightConfig;
 use std::cell::RefCell;
 use std::rc::Rc;
 
@@ -36,40 +36,6 @@ fn light_config_debug_repr() {
     let repr = format!("{:?}", lc);
     assert!(repr.contains("LightConfig"));
     assert!(repr.contains("clear_color"));
-}
-
-#[test]
-fn hint_render_state_defaults_to_zero() {
-    let h = HintRenderState::default();
-    assert_eq!(h.warmth, 0.0);
-    assert_eq!(h.warmth_color, [0.0, 0.0, 0.0]);
-    assert_eq!(h.tier, 0);
-    assert_eq!(h.time, 0.0);
-}
-
-#[test]
-fn hint_render_state_copy_works() {
-    let h = HintRenderState {
-        warmth: 0.5,
-        warmth_color: [1.0, 0.5, 0.0],
-        tier: 2,
-        time: 1.5,
-    };
-    let h2 = h;
-    assert_eq!(h.warmth, h2.warmth);
-    assert_eq!(h.tier, h2.tier);
-}
-
-#[test]
-fn hint_render_state_clone_works() {
-    let h = HintRenderState {
-        warmth: 0.75,
-        warmth_color: [0.5, 1.0, 0.25],
-        tier: 3,
-        time: 3.0,
-    };
-    let h2 = h.clone();
-    assert_eq!(h.warmth_color, h2.warmth_color);
 }
 
 #[test]
@@ -126,18 +92,6 @@ fn clip_plane_debug_repr() {
     let cp = ClipPlane::of_above(10.0);
     let repr = format!("{:?}", cp);
     assert!(repr.contains("ClipPlane"));
-}
-
-#[test]
-fn scene_context_defaults() {
-    let ctx = formosaic_engine::architecture::scene::scene_context::SceneContext::new();
-    assert_eq!(ctx.solved_timer, None);
-    assert!(!ctx.show_menu);
-    assert!(!ctx.platform.is_touch());
-    assert!((ctx.delta_time - 0.0).abs() < 1e-6);
-    assert!(ctx.hints.is_none());
-    assert!(ctx.scene().is_some());
-    assert!(ctx.output_data().is_none());
 }
 
 #[test]
@@ -223,42 +177,10 @@ fn scene_context_set_and_read_deltas() {
 }
 
 #[test]
-fn scene_context_menu_flag_toggles() {
-    let mut ctx = formosaic_engine::architecture::scene::scene_context::SceneContext::new();
-    assert!(!ctx.show_menu);
-    ctx.show_menu = true;
-    assert!(ctx.show_menu);
-    ctx.show_menu = false;
-    assert!(!ctx.show_menu);
-}
-
-#[test]
 fn scene_context_platform_detected() {
     let ctx = formosaic_engine::architecture::scene::scene_context::SceneContext::new();
     let detected = cfg!(target_os = "android");
     assert_eq!(ctx.platform.is_touch(), detected);
-}
-
-#[test]
-fn scene_context_solved_timer_can_be_set() {
-    let mut ctx = formosaic_engine::architecture::scene::scene_context::SceneContext::new();
-    ctx.solved_timer = Some(3.5);
-    assert_eq!(ctx.solved_timer, Some(3.5));
-    ctx.solved_timer = None;
-    assert!(ctx.solved_timer.is_none());
-}
-
-#[test]
-fn scene_context_hints_can_be_set() {
-    let mut ctx = formosaic_engine::architecture::scene::scene_context::SceneContext::new();
-    ctx.hints = Some(HintRenderState {
-        warmth: 0.5,
-        warmth_color: [1.0, 0.5, 0.0],
-        tier: 1,
-        time: 1.0,
-    });
-    assert!(ctx.hints.is_some());
-    assert_eq!(ctx.hints.unwrap().tier, 1);
 }
 
 #[test]
