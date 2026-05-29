@@ -56,6 +56,7 @@ use formosaic_engine::{
     platform::PlatformInfo,
     rendering::{instances::camera::orbit_controller::OrbitController, render_state::LightConfig},
 };
+use crate::rendering::{GameRenderData, HintRenderState};
 use imgui;
 
 use crate::ui::state_machine::{UiContext, UiInput, UiScreen, UiStateMachine, UiTransition};
@@ -720,13 +721,38 @@ impl Formosaic {
             match result {
                 Ok(summaries) if !summaries.is_empty() => {
                     use rand::Rng;
-                    let idx = rand::rng().random_range(0..summaries.len());
-                    let summary = summaries[idx].clone();
-                    self.mode = AppMode::Downloading {
-                        summary: summary.clone(),
+                    // Prefer levels not yet saved locally — every fetch should
+                    // bring something new.  Fall back to the full list only if
+                    // all returned results are already owned.
+                    let saved_ids: std::collections::HashSet<&str> =
+                        self.registry.levels.iter().map(|l| l.id.as_str()).collect();
+                    let available: Vec<&_> = summaries
+                        .iter()
+                        .filter(|s| !saved_ids.contains(s.id.as_str()))
+                        .collect();
+                    let pool: &[_] = if available.is_empty() {
+                        &summaries
+                    } else {
+                        // SAFETY: available elements are &refs into summaries
+                        // We need owned refs, so just work with the indices.
+                        let idx = rand::rng().random_range(0..available.len());
+                        let summary = (*available[idx]).clone();
+                        self.mode = AppMode::Downloading {
+                            summary: summary.clone(),
+                        };
+                        self.client.download_model(&summary);
+                        log::info!("[Formosaic] Downloading '{}' (new)", summary.name);
+                        &[]
                     };
-                    self.client.download_model(&summary);
-                    log::info!("[Formosaic] Downloading '{}'", summary.name);
+                    if !pool.is_empty() {
+                        let idx = rand::rng().random_range(0..pool.len());
+                        let summary = pool[idx].clone();
+                        self.mode = AppMode::Downloading {
+                            summary: summary.clone(),
+                        };
+                        self.client.download_model(&summary);
+                        log::info!("[Formosaic] Downloading '{}' (already owned fallback)", summary.name);
+                    }
                 }
                 Ok(_) => {
                     log::warn!("[Formosaic] Poly Pizza returned 0 models — retrying");
@@ -944,6 +970,10 @@ impl Formosaic {
         let state = Rc::clone(&self.ui_state);
         crate::ui::hud::register(scene, Rc::clone(&state));
         crate::ui::hint_warmth::register(scene, Rc::clone(&state));
+        // Loading overlay shown when a level is loading/building from in-game
+        // (e.g. Play clicked from menu, which transitions UiScreen to Game
+        // before the load completes).
+        crate::ui::loading::register(scene, Rc::clone(&state));
         #[cfg(target_os = "android")]
         crate::ui::touch_buttons::register(scene, Rc::clone(&state));
         crate::ui::credits::register(scene, Rc::clone(&state));
@@ -1214,7 +1244,9 @@ impl Application for Formosaic {
             }
             Event::KeyDown { key: Key::Escape } => {
                 let ui_ctx = UiContext {
-                    is_solved: self.game_state == GameState::Solved,
+                    // Treat Restoring (camera animating after solve) the same
+                    // as Solved for menu routing — the puzzle IS done.
+                    is_solved: matches!(self.game_state, GameState::Solved | GameState::Restoring { .. }),
                     is_downloading: self.is_downloading(),
                     is_loading: self.is_in_menu(),
                 };
@@ -1238,7 +1270,7 @@ impl Application for Formosaic {
 
     fn handle_ui_actions(&mut self, ctx: &mut SceneContext) {
         let ui_ctx = UiContext {
-            is_solved: self.game_state == GameState::Solved,
+            is_solved: matches!(self.game_state, GameState::Solved | GameState::Restoring { .. }),
             is_downloading: self.is_downloading(),
             is_loading: self.is_in_menu(),
         };
@@ -1249,20 +1281,25 @@ impl Application for Formosaic {
     }
 
     fn populate_scene_context(&mut self, ctx: &mut SceneContext, delta_time: f32) {
-        use formosaic_engine::rendering::render_state::HintRenderState;
         let solved = self.game_state == GameState::Solved && !self.is_in_menu();
         let solved_t = self.solved_timer;
         ctx.lights = self.scene_lights;
         ctx.platform = PlatformInfo::detect().with_ui_scale(1.0);
         ctx.delta_time = delta_time;
-        ctx.show_menu = self.ui_machine.screen() == UiScreen::MainMenu;
-        ctx.solved_timer = if solved { Some(solved_t) } else { None };
-        ctx.hints = self.last_hint_output.as_ref().map(|o| HintRenderState {
-            warmth: o.warmth,
-            warmth_color: o.warmth_color,
-            tier: o.tier.as_u8(),
-            time: solved_t,
-        });
+        // Generic engine flag: skip geometry/lighting when showing full-screen
+        // menu.  The pipeline checks this without knowing anything about menus.
+        ctx.render_3d = !self.is_in_menu();
+        // Pack game-specific render data into a type-erased slot.
+        // Game-side renderers downcast to GameRenderData.
+        ctx.game_render_data = Some(Box::new(GameRenderData {
+            hints: self.last_hint_output.as_ref().map(|o| HintRenderState {
+                warmth: o.warmth,
+                warmth_color: o.warmth_color,
+                tier: o.tier.as_u8(),
+                time: solved_t,
+            }),
+            solved_timer: if solved { Some(solved_t) } else { None },
+        }));
 
         // Sync game state into UiState so UiNodes can read it this frame.
         {

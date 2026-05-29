@@ -287,7 +287,7 @@ impl IRenderer for MenuRenderer {
     fn render(&mut self, ctx: &SceneContext) {
         // Draw animated backdrop only when in menu.
         // Touch buttons are drawn by imgui (build_ui in formosaic.rs).
-        if ctx.show_menu {
+        if !ctx.render_3d {
             let res = ctx.get_camera().borrow().resolution;
             let w = res.x as f32;
             let h = res.y as f32;

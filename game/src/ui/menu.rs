@@ -15,6 +15,7 @@ pub fn register(scene: &Scenegraph, state: Rc<RefCell<UiState>>) {
         let is_touch = s.is_touch;
         let levels = s.levels.clone();
         let _is_dl = s.is_downloading;
+        let _is_loading = s.is_loading;
 
         let menu_flags = WindowFlags::NO_DECORATION
             | WindowFlags::NO_MOVE
@@ -122,6 +123,8 @@ pub fn register(scene: &Scenegraph, state: Rc<RefCell<UiState>>) {
 
                     let half = (w - pad * 3.0) * 0.5;
                     ui.set_cursor_pos([pad, btns_y]);
+                    let busy = _is_dl || _is_loading;
+                    let _dis = ui.begin_disabled(busy);
                     if ui.button_with_size("+ Fetch Online", [half, btn_h]) {
                         ctx.push_ui_action(UiInput::FetchOnline);
                     }
@@ -129,6 +132,7 @@ pub fn register(scene: &Scenegraph, state: Rc<RefCell<UiState>>) {
                     if ui.button_with_size("Random", [half, btn_h]) {
                         ctx.push_ui_action(UiInput::RandomSaved);
                     }
+                    drop(_dis);
                     ui.dummy([0.0, pad]);
                 } else {
                     let bar_h = scale.su(28.0);
@@ -164,6 +168,7 @@ pub fn register(scene: &Scenegraph, state: Rc<RefCell<UiState>>) {
                             ui.set_cursor_pos([w - ver_w - pad, (bar_h - 13.0) * 0.5]);
                             ui.text_colored([0.28, 0.34, 0.46, 0.6], "v0.1");
                             ui.set_cursor_pos([r_x, scale.su(2.0)]);
+                            let _dis2 = ui.begin_disabled(_is_dl || _is_loading);
                             if ui.button_with_size("[R] Random", [r_w, btn_h_bar]) {
                                 ctx.push_ui_action(UiInput::RandomSaved);
                             }
@@ -171,6 +176,7 @@ pub fn register(scene: &Scenegraph, state: Rc<RefCell<UiState>>) {
                             if ui.button_with_size("[N] Fetch Online", [n_w, btn_h_bar]) {
                                 ctx.push_ui_action(UiInput::FetchOnline);
                             }
+                            drop(_dis2);
                         });
                     drop(_tok);
 

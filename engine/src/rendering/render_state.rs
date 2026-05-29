@@ -35,11 +35,3 @@ impl Default for LightConfig {
     }
 }
 
-/// Hint overlay state for the current frame.
-#[derive(Clone, Copy, Default)]
-pub struct HintRenderState {
-    pub warmth: f32,
-    pub warmth_color: [f32; 3],
-    pub tier: u8,
-    pub time: f32,
-}

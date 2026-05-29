@@ -10,7 +10,7 @@ use crate::{
     rendering::{
         instances::camera::camera::Camera,
         render_output_data::RenderOutputData,
-        render_state::{HintRenderState, LightConfig},
+        render_state::LightConfig,
     },
 };
 
@@ -23,16 +23,17 @@ pub struct SceneContext {
     // ── Per-frame render state — written by the game layer, read by renderers ──
     /// Scene lighting — read by the deferred lighting pass.
     pub lights: LightConfig,
-    /// Hint overlay state — None means no hint active.
-    pub hints: Option<HintRenderState>,
-    /// Seconds since solve — None means not solved.
-    pub solved_timer: Option<f32>,
-    /// Whether the menu overlay is currently showing.
-    pub show_menu: bool,
+    /// When `false` the engine skips the geometry/lighting passes entirely.
+    /// Defaults to `true`. The game sets this to `false` on full-screen menus.
+    pub render_3d: bool,
     /// Platform information (touch vs desktop, UI scale, etc.).
     pub platform: PlatformInfo,
     /// Frame delta time in seconds.
     pub delta_time: f32,
+    /// Opaque per-frame data written by the game layer, forwarded to
+    /// game-side renderers.  The engine never inspects this.  Renderers
+    /// downcast to their own concrete game struct.
+    pub game_render_data: Option<Box<dyn Any>>,
 
     ui_actions: Vec<Box<dyn Any>>,
 }
@@ -46,11 +47,10 @@ impl SceneContext {
             output_data: None,
             camera,
             lights: LightConfig::default(),
-            hints: None,
-            solved_timer: None,
-            show_menu: false,
+            render_3d: true,
             platform: PlatformInfo::detect(),
             delta_time: 0.0,
+            game_render_data: None,
             ui_actions: Vec::new(),
         }
     }
@@ -102,14 +102,20 @@ impl SceneContext {
     }
 
     /// Drain queued UI actions of one concrete type.
+    ///
+    /// Actions that do not match type `A` are **re-queued** rather than
+    /// silently dropped, so multiple action types can coexist safely.
     pub fn drain_ui_actions<A: Any>(&mut self) -> Vec<A> {
-        let mut actions = Vec::new();
+        let mut matched = Vec::new();
+        let mut remaining = Vec::new();
         for action in std::mem::take(&mut self.ui_actions) {
-            if let Ok(action) = action.downcast::<A>() {
-                actions.push(*action);
+            match action.downcast::<A>() {
+                Ok(a) => matched.push(*a),
+                Err(a) => remaining.push(a),
             }
         }
-        actions
+        self.ui_actions = remaining;
+        matched
     }
 }
 

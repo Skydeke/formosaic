@@ -44,10 +44,6 @@ use crate::architecture::scene::node::scenegraph::Scenegraph;
 use crate::architecture::scene::node::transform::Transform;
 use crate::architecture::scene::scene_context::SceneContext;
 
-/// Marker passed to action-enabled UI callbacks.
-#[derive(Clone, Copy, Debug, Default)]
-pub struct UiActionSink;
-
 // ─── Callback type ────────────────────────────────────────────────────────────
 
 /// Signature of a UI-building callback.
@@ -56,12 +52,6 @@ pub struct UiActionSink;
 /// `w/h` — logical (unscaled) viewport dimensions.
 /// `ctx` — mutable scene context (read game state, fire events, etc.).
 pub type UiCallback = Box<dyn FnMut(&imgui::Ui, f32, f32, &mut SceneContext)>;
-pub type UiActionCallback = Box<dyn FnMut(&imgui::Ui, f32, f32, &mut SceneContext, &UiActionSink)>;
-
-enum CallbackKind {
-    Build(UiCallback),
-    Action(UiActionCallback),
-}
 
 // ─── UiNode ──────────────────────────────────────────────────────────────────
 
@@ -72,7 +62,7 @@ pub struct UiNode {
     hidden: bool,
     transform: Transform,
     children: Vec<Rc<RefCell<dyn NodeBehavior>>>,
-    callback: CallbackKind,
+    callback: UiCallback,
 }
 
 impl UiNode {
@@ -87,31 +77,14 @@ impl UiNode {
             hidden: false,
             transform: Transform::new(),
             children: Vec::new(),
-            callback: CallbackKind::Build(Box::new(callback)),
-        }
-    }
-
-    pub fn new_with_actions<F>(name: impl Into<String>, callback: F) -> Self
-    where
-        F: FnMut(&imgui::Ui, f32, f32, &mut SceneContext, &UiActionSink) + 'static,
-    {
-        Self {
-            uuid: rand::rng().random(),
-            name: name.into(),
-            hidden: false,
-            transform: Transform::new(),
-            children: Vec::new(),
-            callback: CallbackKind::Action(Box::new(callback)),
+            callback: Box::new(callback),
         }
     }
 
     /// Invoke the callback — called by the engine inside the imgui frame.
     pub fn build(&mut self, ui: &imgui::Ui, w: f32, h: f32, ctx: &mut SceneContext) {
         if !self.hidden {
-            match &mut self.callback {
-                CallbackKind::Build(cb) => cb(ui, w, h, ctx),
-                CallbackKind::Action(cb) => cb(ui, w, h, ctx, &UiActionSink),
-            }
+            (self.callback)(ui, w, h, ctx);
         }
     }
 
@@ -134,10 +107,7 @@ impl UiNode {
             let mut borrow = node_rc.borrow_mut();
             if let Some(ui_node) = borrow.as_any_mut().downcast_mut::<UiNode>() {
                 if !ui_node.is_hidden() {
-                    match &mut ui_node.callback {
-                        CallbackKind::Build(cb) => cb(ui, w, h, ctx),
-                        CallbackKind::Action(cb) => cb(ui, w, h, ctx, &UiActionSink),
-                    }
+                    (ui_node.callback)(ui, w, h, ctx);
                 }
             }
         }

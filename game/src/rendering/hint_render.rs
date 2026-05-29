@@ -3,6 +3,7 @@
 //! Uses ShaderProgram<NoopProcessable> + UniformAdapter — same pattern as EntityRenderer.
 
 use cgmath::Vector3;
+use crate::rendering::{GameRenderData, HintRenderState};
 use formosaic_engine::{
     architecture::scene::scene_context::SceneContext,
     opengl::{
@@ -104,7 +105,12 @@ impl IRenderer for HintRenderer {
     }
 
     fn render(&mut self, context: &SceneContext) {
-        let hints = match context.hints {
+        let hints: HintRenderState = match context
+            .game_render_data
+            .as_ref()
+            .and_then(|d| d.downcast_ref::<GameRenderData>())
+            .and_then(|d| d.hints)
+        {
             Some(h) if h.tier >= 1 => h,
             _ => return,
         };

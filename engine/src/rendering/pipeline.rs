@@ -134,7 +134,7 @@ impl Pipeline {
     }
 
     fn geometry_pass(&mut self, clear_color: [f32; 3]) {
-        let show_menu = self.context.borrow().show_menu;
+        let render_3d = self.context.borrow().render_3d;
 
         self.deferred_fbo.bind(FboTarget::DrawFramebuffer);
         unsafe {
@@ -142,7 +142,7 @@ impl Pipeline {
             gl::Clear(gl::COLOR_BUFFER_BIT | gl::DEPTH_BUFFER_BIT | gl::STENCIL_BUFFER_BIT);
         }
 
-        if !show_menu {
+        if render_3d {
             let [r, g, b] = clear_color;
             unsafe {
                 gl::ClearColor(r, g, b, 1.0);

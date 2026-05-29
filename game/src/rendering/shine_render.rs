@@ -4,6 +4,7 @@
 //! FrameState — the same pattern as EntityRenderer and LightingPass.
 //! No raw gl::Uniform* calls, no uniform_location.
 
+use crate::rendering::GameRenderData;
 use formosaic_engine::{
     architecture::scene::scene_context::SceneContext,
     opengl::{
@@ -116,7 +117,12 @@ impl IRenderer for ShineRenderer {
     }
 
     fn render(&mut self, context: &SceneContext) {
-        let timer = match context.solved_timer {
+        let timer = match context
+            .game_render_data
+            .as_ref()
+            .and_then(|d| d.downcast_ref::<GameRenderData>())
+            .and_then(|d| d.solved_timer)
+        {
             Some(t) => t,
             None => return,
         };
