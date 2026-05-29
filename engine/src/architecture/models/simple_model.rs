@@ -134,7 +134,6 @@ impl SimpleModel {
             }
             self.player.update(dt);
         }
-        self.refresh_visual_center();
     }
 
     pub fn bone_matrices_for_mesh(&self, mesh_idx: usize) -> &[Matrix4<f32>] {
@@ -349,7 +348,6 @@ impl Model for SimpleModel {
             }
             self.player.update(dt);
         }
-        self.refresh_visual_center();
     }
 
     fn animations(&self) -> &[AnimationClip] {

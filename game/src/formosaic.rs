@@ -495,10 +495,10 @@ impl Formosaic {
         }
         // No saved levels — fetch one online instead
         log::info!("[Formosaic] No saved levels for random — fetching online");
-        self.fetch_online_level();
+        self.fetch_online_level(ctx);
     }
 
-    fn fetch_online_level(&mut self) {
+    fn fetch_online_level(&mut self, ctx: &mut SceneContext) {
         if !self.client.is_explore_pending() {
             self.mode = AppMode::FetchingOnline;
             self.loading_started = Some(Instant::now());
@@ -509,6 +509,7 @@ impl Formosaic {
             // page is chosen — all handled inside fetch_explore.
             self.client.fetch_explore_page(0, 20);
             log::info!("[Formosaic] Fetching poly.pizza random page");
+            self.sync_scenegraph(ctx);
         }
     }
 
@@ -998,6 +999,11 @@ impl Formosaic {
             match transition {
                 UiTransition::ShowMainMenu => {
                     self.mode = AppMode::LevelSelect;
+                    self.model = None;
+                    self.entity = None;
+                    self.orbit = None;
+                    self.scramble_state = None;
+                    self.entropy_report = None;
                     self.incremental_builder = None;
                     self.pending_finalize_builder = None;
                     self.pending_axis = None;
@@ -1016,7 +1022,7 @@ impl Formosaic {
                         }
                     }
                 }
-                UiTransition::FetchOnline => self.fetch_online_level(),
+                UiTransition::FetchOnline => self.fetch_online_level(ctx),
                 UiTransition::RandomSaved => self.load_random_saved(ctx),
                 UiTransition::AdvanceHint => self.hints.advance(),
                 UiTransition::OpenArtistLink(url) => {
@@ -1137,17 +1143,24 @@ impl Application for Formosaic {
         self.poll_client(ctx);
 
         // Update hints once per frame and cache for the renderer.
-        self.last_hint_output = if let Some(sc) = &self.scramble_state {
-            let camera = ctx.camera();
-            let fwd = camera.borrow().transform.forward().normalize();
-            let output = self.hints.update(delta_time, fwd, sc.solution_dir);
-            // Apply ghost-snap lerp (Tier 3 hint).
-            if output.ghost_lerp > 0.0 {
-                if let Some(model) = &self.model {
-                    apply_displacement(model, sc, 1.0 - output.ghost_lerp);
+        // Skip hint updates once the puzzle is solved — hints are frozen at
+        // tier None after finish_restore resets them, and we must not keep
+        // calling hints.update() which would keep ghost-snap active.
+        self.last_hint_output = if matches!(self.game_state, GameState::Playing) {
+            if let Some(sc) = &self.scramble_state {
+                let camera = ctx.camera();
+                let fwd = camera.borrow().transform.forward().normalize();
+                let output = self.hints.update(delta_time, fwd, sc.solution_dir);
+                // Apply ghost-snap lerp (Tier 3 hint).
+                if output.ghost_lerp > 0.0 {
+                    if let Some(model) = &self.model {
+                        apply_displacement(model, sc, 1.0 - output.ghost_lerp);
+                    }
                 }
+                Some(output)
+            } else {
+                None
             }
-            Some(output)
         } else {
             None
         };
@@ -1227,8 +1240,11 @@ impl Application for Formosaic {
     fn on_event(&mut self, event: &Event, ctx: &mut SceneContext) {
         match event {
             Event::KeyDown { key: Key::H } => {
-                self.hints.advance();
-                log::info!("[Formosaic] Hint → {:?}", self.hints.tier());
+                // Hints are meaningless after solve — ignore.
+                if !matches!(self.game_state, GameState::Solved | GameState::Restoring { .. }) {
+                    self.hints.advance();
+                    log::info!("[Formosaic] Hint → {:?}", self.hints.tier());
+                }
             }
             Event::KeyDown { key: Key::K } => {
                 log::info!("[Formosaic] Cheat-solve");
@@ -1240,7 +1256,7 @@ impl Application for Formosaic {
             }
             Event::KeyDown { key: Key::N } => {
                 log::info!("[Formosaic] Online random level");
-                self.fetch_online_level();
+                self.fetch_online_level(ctx);
             }
             Event::KeyDown { key: Key::Escape } => {
                 let ui_ctx = UiContext {
@@ -1248,7 +1264,13 @@ impl Application for Formosaic {
                     // as Solved for menu routing — the puzzle IS done.
                     is_solved: matches!(self.game_state, GameState::Solved | GameState::Restoring { .. }),
                     is_downloading: self.is_downloading(),
-                    is_loading: self.is_in_menu(),
+                    is_loading: matches!(
+                self.mode,
+                AppMode::Loading { .. }
+                    | AppMode::Building { .. }
+                    | AppMode::Downloading { .. }
+                    | AppMode::FetchingOnline
+            ),
                 };
                 let inputs = self.ui_machine.handle(UiInput::EscapePressed, &ui_ctx);
                 self.apply_ui_transitions(inputs, ctx);
@@ -1272,11 +1294,26 @@ impl Application for Formosaic {
         let ui_ctx = UiContext {
             is_solved: matches!(self.game_state, GameState::Solved | GameState::Restoring { .. }),
             is_downloading: self.is_downloading(),
-            is_loading: self.is_in_menu(),
+            is_loading: matches!(
+                self.mode,
+                AppMode::Loading { .. }
+                    | AppMode::Building { .. }
+                    | AppMode::Downloading { .. }
+                    | AppMode::FetchingOnline
+            ),
         };
-        for input in ctx.drain_ui_actions::<UiInput>() {
+        // Drain all pending actions but stop processing after any screen
+        // transition — leftover clicks from the previous screen must not
+        // fire against the new screen state.
+        let actions: Vec<UiInput> = ctx.drain_ui_actions::<UiInput>();
+        for input in actions {
+            let prev = self.ui_machine.screen();
             let transitions = self.ui_machine.handle(input, &ui_ctx);
             self.apply_ui_transitions(transitions, ctx);
+            if self.ui_machine.screen() != prev {
+                ctx.drain_ui_actions::<UiInput>(); // discard stale clicks
+                break;
+            }
         }
     }
 
@@ -1313,7 +1350,9 @@ impl Application for Formosaic {
                 .as_ref()
                 .map(|o| o.warmth)
                 .unwrap_or(0.5);
-            ui.is_solved = self.game_state == GameState::Solved;
+            // Treat Restoring (camera animating post-solve) same as Solved
+            // so Credits widget shows immediately when user presses Menu.
+            ui.is_solved = matches!(self.game_state, GameState::Solved | GameState::Restoring { .. });
             ui.is_downloading = matches!(self.mode, AppMode::Downloading { .. })
                 || self.client.is_download_pending();
             ui.is_loading = matches!(

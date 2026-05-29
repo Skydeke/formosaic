@@ -67,6 +67,7 @@ impl UiStateMachine {
                 }
                 UiInput::FetchOnline => {
                     if !ctx.is_downloading && !ctx.is_loading {
+                        self.screen = UiScreen::Game;
                         vec![UiTransition::FetchOnline]
                     } else {
                         Vec::new()
@@ -74,6 +75,7 @@ impl UiStateMachine {
                 }
                 UiInput::RandomSaved => {
                     if !ctx.is_downloading && !ctx.is_loading {
+                        self.screen = UiScreen::Game;
                         vec![UiTransition::RandomSaved]
                     } else {
                         Vec::new()
@@ -83,7 +85,8 @@ impl UiStateMachine {
             },
             UiScreen::Game => match input {
                 UiInput::Hint => {
-                    if !ctx.is_loading {
+                    // No hints once solved (or camera-restoring post-solve).
+                    if !ctx.is_loading && !ctx.is_solved {
                         vec![UiTransition::AdvanceHint]
                     } else {
                         Vec::new()
