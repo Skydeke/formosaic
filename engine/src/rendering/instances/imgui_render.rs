@@ -16,6 +16,7 @@ use imgui::{DrawData, DrawIdx, DrawVert, TextureId};
 use winit::window::Window;
 
 use crate::architecture::scene::{node::ui_node::UiNode, scene_context::SceneContext};
+use crate::platform::PlatformInfo;
 use crate::opengl::{
     constants::{data_type::DataType, vbo_target::VboTarget, vbo_usage::VboUsage},
     fbos::simple_texture::SimpleTexture,
@@ -198,7 +199,7 @@ const DEFAULT_FRAG: &str = include_str!("../../../assets/shaders/imgui.frag.glsl
 impl ImguiGlRenderer {
     pub fn new(
         mut imgui: imgui::Context,
-        platform: imgui_winit_support::WinitPlatform,
+        mut platform: imgui_winit_support::WinitPlatform,
     ) -> Result<Self, Box<dyn std::error::Error>> {
         let frame = Rc::new(RefCell::new(FrameState {
             proj: Matrix4::from_scale(1.0),
@@ -253,6 +254,22 @@ impl ImguiGlRenderer {
         }
         font_tex.unbind();
         imgui.fonts().tex_id = TextureId::new(font_tex.get_id() as usize);
+
+        // On touch platforms, derive the scroll divisor from actual font metrics
+        // so finger-drag tracks 1:1 with content movement.
+        // imgui scrolls 5 × CalcFontSize() logical px per wheel unit, so the
+        // divisor must equal that step to cancel amplification.
+        if PlatformInfo::detect().is_touch() {
+            let font_global_scale = imgui.io().font_global_scale;
+            let first_font = {
+                let atlas = imgui.fonts();
+                atlas.fonts().first().and_then(|id| atlas.get_font(*id)).map(|f| (f.font_size, f.scale))
+            };
+            if let Some((font_size, font_scale)) = first_font {
+                let logical_font_size = font_global_scale * font_size * font_scale;
+                platform.touch_scroll_divisor = (5.0 * logical_font_size).round().max(1.0);
+            }
+        }
 
         Ok(Self {
             gl: GlResources {

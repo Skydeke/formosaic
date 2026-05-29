@@ -19,6 +19,11 @@ pub struct WinitPlatform {
     cursor_cache: Option<CursorSettings>,
     /// Last touch Y position for synthesizing scroll from finger drag.
     touch_last_y: Option<f32>,
+    /// Divisor applied to finger-pixel delta when synthesizing scroll events
+    /// from touch drags.  Smaller = more scroll per pixel of finger movement.
+    /// Desktop default (16) assumes ~24px rows.  Touch UIs with taller items
+    /// should use a larger value (e.g. 48).
+    pub touch_scroll_divisor: f32,
 }
 
 impl WinitPlatform {
@@ -35,6 +40,7 @@ impl WinitPlatform {
             hidpi_factor: 1.0,
             cursor_cache: None,
             touch_last_y: None,
+            touch_scroll_divisor: 16.0,
         }
     }
 
@@ -172,9 +178,7 @@ impl WinitPlatform {
                         // child-window scrolling works without a scrollbar.
                         if let Some(last_y) = self.touch_last_y {
                             let delta = ly - last_y;
-                            // Scale: imgui scroll unit ≈ one text line (~16px).
-                            // Divide by 16 so a full-screen drag scrolls ~50 lines.
-                            io.add_mouse_wheel_event([0.0, delta / 16.0]);
+                            io.add_mouse_wheel_event([0.0, delta / self.touch_scroll_divisor]);
                         }
                         self.touch_last_y = Some(ly);
                     }
