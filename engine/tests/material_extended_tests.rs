@@ -89,9 +89,9 @@ fn material_default_has_no_textures() {
 }
 
 #[test]
-fn material_default_culls_backfaces() {
+fn material_default_does_not_cull_backfaces() {
     let mat = Material::default();
-    assert!(mat.cull_backface);
+    assert!(!mat.cull_backface);
 }
 
 #[test]

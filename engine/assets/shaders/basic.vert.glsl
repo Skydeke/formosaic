@@ -5,7 +5,7 @@ precision highp int;
 layout (location = 0) in vec3 pos;
 layout (location = 1) in vec2 uv;
 layout (location = 2) in vec3 norm;
-layout (location = 3) in ivec4 boneIndices;
+layout (location = 3) in vec4 boneIndices;  // stored as float; cast to int before use
 layout (location = 4) in vec4 boneWeights;
 layout (location = 5) in vec4 vertColor;
 
@@ -28,7 +28,7 @@ void main() {
         vec3 blendedNorm = vec3(0.0, 0.0, 0.0);
         bool hasInfluence = false;
         for (int i = 0; i < 4; i++) {
-            int boneIdx = boneIndices[i];
+            int boneIdx = int(boneIndices[i]);
             float weight = boneWeights[i];
             if (boneIdx >= 0 && weight > 0.0) {
                 mat4 bone = uBones[boneIdx];

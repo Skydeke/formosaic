@@ -34,9 +34,9 @@ pub fn register(scene: &Scenegraph, state: Rc<RefCell<UiState>>) {
                     cold[2] + (hot[2] - cold[2]) * w,
                     1.0,
                 ];
-                let label = if w > 0.8 {
+                let label = if w > 0.92 {
                     "HOT"
-                } else if w > 0.5 {
+                } else if w > 0.65 {
                     "WARM"
                 } else {
                     "COLD"

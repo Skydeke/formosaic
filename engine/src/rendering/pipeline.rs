@@ -190,8 +190,7 @@ impl Pipeline {
             gl::UseProgram(0);
             gl::Enable(gl::DEPTH_TEST);
             gl::DepthMask(gl::TRUE);
-            gl::Enable(gl::CULL_FACE);
-            gl::CullFace(gl::BACK);
+            gl::Disable(gl::CULL_FACE);
             gl::Disable(gl::BLEND);
         }
         let ctx = self.context.borrow();

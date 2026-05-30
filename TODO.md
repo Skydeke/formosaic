@@ -7,15 +7,7 @@
 
 - Better Event system (integrated with the statemachine)
 
-- Disable Backface culling everywhere.
-
-- Hint system needs to be preciser when close to the solution.
-
-- Level says 1 hint ingame even if none was used.
-
 - Computer Model's texture is more gray in my game, when it should be closer to black
 
 - stylized Charcater rendered wrong android
 - Character Soldier, wrong transforms?
-
-- replicate default scroll behavior on android

@@ -79,7 +79,7 @@ impl Default for Material {
             occlusion_texture: None,
             specular_texture: None,
 
-            cull_backface: true,
+            cull_backface: false,
             alpha_mode: AlphaMode::Opaque,
             emissive_strength: 1.0,
         }

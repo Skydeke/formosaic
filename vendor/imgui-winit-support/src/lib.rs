@@ -1,4 +1,5 @@
 use imgui::{self, BackendFlags, ConfigFlags, Context, Io, Key, Ui};
+use std::cell::Cell;
 use std::cmp::Ordering;
 
 pub use winit;
@@ -24,6 +25,10 @@ pub struct WinitPlatform {
     /// Desktop default (16) assumes ~24px rows.  Touch UIs with taller items
     /// should use a larger value (e.g. 48).
     pub touch_scroll_divisor: f32,
+    /// Smoothed touch-scroll velocity (scroll-units per frame) for momentum.
+    touch_velocity: f32,
+    /// Active momentum velocity decaying each frame.  None when idle.
+    touch_momentum: Cell<Option<f32>>,
 }
 
 impl WinitPlatform {
@@ -41,6 +46,8 @@ impl WinitPlatform {
             cursor_cache: None,
             touch_last_y: None,
             touch_scroll_divisor: 16.0,
+            touch_velocity: 0.0,
+            touch_momentum: Cell::new(None),
         }
     }
 
@@ -170,6 +177,9 @@ impl WinitPlatform {
                         io.add_mouse_button_event(imgui::MouseButton::Left, true);
                     }
                     TouchPhase::Ended | TouchPhase::Cancelled => {
+                        if self.touch_velocity.abs() > 0.3 {
+                            self.touch_momentum.set(Some(self.touch_velocity));
+                        }
                         self.touch_last_y = None;
                         io.add_mouse_button_event(imgui::MouseButton::Left, false);
                     }
@@ -178,7 +188,9 @@ impl WinitPlatform {
                         // child-window scrolling works without a scrollbar.
                         if let Some(last_y) = self.touch_last_y {
                             let delta = ly - last_y;
-                            io.add_mouse_wheel_event([0.0, delta / self.touch_scroll_divisor]);
+                            let scroll = delta / self.touch_scroll_divisor;
+                            self.touch_velocity = scroll;
+                            io.add_mouse_wheel_event([0.0, scroll]);
                         }
                         self.touch_last_y = Some(ly);
                     }
@@ -192,6 +204,16 @@ impl WinitPlatform {
     }
 
     pub fn prepare_frame(&self, io: &mut Io, window: &Window) -> Result<(), ExternalError> {
+        // Decaying momentum from touch fling gestures.
+        if let Some(vel) = self.touch_momentum.get() {
+            if vel.abs() > 0.01 {
+                io.add_mouse_wheel_event([0.0, vel]);
+                self.touch_momentum.set(Some(vel * 0.95));
+            } else {
+                self.touch_momentum.set(None);
+            }
+        }
+
         if io.want_set_mouse_pos {
             let logical_pos = self.scale_pos_for_winit(
                 window,

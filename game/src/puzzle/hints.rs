@@ -119,7 +119,15 @@ impl HintSystem {
         solution_dir: Vector3<f32>,
     ) -> HintOutput {
         let dot = camera_fwd.normalize().dot(solution_dir.normalize());
-        let warmth = (dot.abs() + 1.0) * 0.5; // 0.5 = perpendicular, 1 = on-axis
+        // Map dot from [-1, 1] to [0, 1]: 1 means camera faces the solution axis,
+        // 0 means facing directly away.  We take the absolute value so *either*
+        // pole of the solution axis counts as "warm" (the puzzle is rotationally
+        // symmetric around the axis).
+        // Apply a power curve so the indicator sharpens as the camera approaches
+        // the target hemisphere — small angles (close to solution) produce warmth
+        // values near 1.0 much more distinctly than with a linear mapping.
+        let linear = (dot.abs() + 1.0) * 0.5; // [0.5, 1.0] — abs keeps both poles warm
+        let warmth = linear.powf(3.0).clamp(0.0, 1.0); // sharpen near solution
 
         // Ghost snap: slowly un-scramble over ~5 s.
         if self.tier == HintTier::GhostSnap {

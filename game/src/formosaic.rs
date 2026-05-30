@@ -277,7 +277,7 @@ impl Formosaic {
         self.model = None;
         self.entity = None;
         self.orbit = None;
-        self.hints.reset();
+        self.hints.reset_full(); // New level: reset per-level hint count
         self.loading_started = None;
         self.incremental_builder = None;
         self.pending_finalize_builder = None;
@@ -533,7 +533,7 @@ impl Formosaic {
         self.orbit = None;
         self.scramble_state = None;
         self.entropy_report = None;
-        self.hints.reset();
+        self.hints.reset_full(); // New level: reset per-level hint count
         self.sync_scenegraph(ctx);
         let tx = self.load_tx.clone();
         std::thread::spawn(move || {
@@ -850,7 +850,7 @@ impl Formosaic {
         self.orbit = None;
         self.scramble_state = None;
         self.entropy_report = None;
-        self.hints.reset();
+        self.hints.reset_full(); // New level: reset per-level hint count
         self.sync_scenegraph(ctx);
         let tx = self.load_tx.clone();
         std::thread::spawn(move || {

@@ -58,7 +58,11 @@ impl ModelLoader {
         Self::prepare_from_bytes(path, bytes, hint)
     }
 
-    pub fn prepare_from_bytes(cache_key: &str, bytes: &[u8], hint: &str) -> Result<ModelLoadData, String> {
+    pub fn prepare_from_bytes(
+        cache_key: &str,
+        bytes: &[u8],
+        hint: &str,
+    ) -> Result<ModelLoadData, String> {
         let scene = Scene::from_buffer(
             bytes,
             vec![
@@ -118,9 +122,22 @@ impl ModelLoader {
         let meshes: Vec<PreparedMesh> = scene
             .meshes
             .iter()
-            .map(|m| {
+            .enumerate()
+            .map(|(mesh_idx, m)| {
+                // Accumulate centroid in world space by applying the mesh's node
+                // transform.  Without this, hierarchical models (where body parts
+                // are positioned via node transforms) produce a centroid near the
+                // scene origin rather than the visual centre of the model, causing
+                // the orbit camera to target empty space instead of the character.
+                let node_xform = mesh_transforms
+                    .get(mesh_idx)
+                    .copied()
+                    .flatten()
+                    .unwrap_or_else(|| Matrix4::from_scale(1.0));
                 for v in &m.vertices {
-                    sum += Vector3::new(v.x, v.y, v.z);
+                    let local = cgmath::Vector4::new(v.x, v.y, v.z, 1.0);
+                    let world = node_xform * local;
+                    sum += Vector3::new(world.x, world.y, world.z);
                     count += 1;
                 }
                 Self::process_mesh_prepared(m, &name_to_global_idx)
@@ -164,7 +181,7 @@ impl ModelLoader {
         })
     }
 
-    fn build_skeleton(scene: &Scene, prepared_meshes: &[PreparedMesh]) -> Option<Skeleton> {
+    fn build_skeleton(scene: &Scene, _prepared_meshes: &[PreparedMesh]) -> Option<Skeleton> {
         // Collect ALL bones across ALL meshes.  Different meshes may have
         // different offset matrices for the same bone (because they are in
         // different local spaces / node transforms).  We store every offset
@@ -214,9 +231,8 @@ impl ModelLoader {
             None
         }
 
-        let armature_root: Option<Rc<russimp_ng::node::Node>> = bone_names_ordered
-            .first()
-            .and_then(|first_bone| {
+        let armature_root: Option<Rc<russimp_ng::node::Node>> =
+            bone_names_ordered.first().and_then(|first_bone| {
                 scene
                     .root
                     .as_ref()
@@ -289,8 +305,7 @@ impl ModelLoader {
             bone_name: &str,
             accumulated: Matrix4<f32>,
         ) -> Option<Matrix4<f32>> {
-            let node_world =
-                accumulated * ModelLoader::ai_matrix_to_cg(&node.transformation);
+            let node_world = accumulated * ModelLoader::ai_matrix_to_cg(&node.transformation);
             for child in node.children.borrow().iter() {
                 if child.name == bone_name {
                     return Some(node_world);
@@ -362,7 +377,7 @@ impl ModelLoader {
 
         match &tex.data {
             russimp_ng::material::DataContent::Bytes(bytes) => {
-                if tex.height > 0 {
+                if tex.height > 0 && tex.width > 0 {
                     let expected = (tex.width * tex.height * 4) as usize;
 
                     if bytes.len() != expected {
@@ -766,19 +781,43 @@ mod tests {
 
     fn identity4() -> Matrix4x4 {
         Matrix4x4 {
-            a1: 1.0, a2: 0.0, a3: 0.0, a4: 0.0,
-            b1: 0.0, b2: 1.0, b3: 0.0, b4: 0.0,
-            c1: 0.0, c2: 0.0, c3: 1.0, c4: 0.0,
-            d1: 0.0, d2: 0.0, d3: 0.0, d4: 1.0,
+            a1: 1.0,
+            a2: 0.0,
+            a3: 0.0,
+            a4: 0.0,
+            b1: 0.0,
+            b2: 1.0,
+            b3: 0.0,
+            b4: 0.0,
+            c1: 0.0,
+            c2: 0.0,
+            c3: 1.0,
+            c4: 0.0,
+            d1: 0.0,
+            d2: 0.0,
+            d3: 0.0,
+            d4: 1.0,
         }
     }
 
     fn scale999() -> Matrix4x4 {
         Matrix4x4 {
-            a1: 999.0, a2: 0.0, a3: 0.0, a4: 0.0,
-            b1: 0.0, b2: 999.0, b3: 0.0, b4: 0.0,
-            c1: 0.0, c2: 0.0, c3: 999.0, c4: 0.0,
-            d1: 0.0, d2: 0.0, d3: 0.0, d4: 1.0,
+            a1: 999.0,
+            a2: 0.0,
+            a3: 0.0,
+            a4: 0.0,
+            b1: 0.0,
+            b2: 999.0,
+            b3: 0.0,
+            b4: 0.0,
+            c1: 0.0,
+            c2: 0.0,
+            c3: 999.0,
+            c4: 0.0,
+            d1: 0.0,
+            d2: 0.0,
+            d3: 0.0,
+            d4: 1.0,
         }
     }
 
@@ -818,13 +857,11 @@ mod tests {
 
         let scene = russimp_ng::scene::Scene {
             root: Some(root),
-            meshes: vec![
-                russimp_ng::mesh::Mesh {
-                    name: "TestMesh".into(),
-                    bones: vec![bone("Root"), bone("Body")],
-                    ..Default::default()
-                },
-            ],
+            meshes: vec![russimp_ng::mesh::Mesh {
+                name: "TestMesh".into(),
+                bones: vec![bone("Root"), bone("Body")],
+                ..Default::default()
+            }],
             materials: Vec::new(),
             animations: Vec::new(),
             cameras: Vec::new(),
@@ -844,8 +881,7 @@ mod tests {
             "Body bone parent should be Root (armature subtree search)"
         );
         assert_eq!(
-            skel.bones[root_idx].parent_index,
-            None,
+            skel.bones[root_idx].parent_index, None,
             "Root bone should have no parent"
         );
 

@@ -29,6 +29,16 @@ pub struct Skeleton {
     pub mesh_count: usize,
     /// Pre-allocated workspace for final matrices (avoids re-allocation each frame).
     final_matrices: Vec<Matrix4<f32>>,
+    /// Per-bone animated world transforms (bind-pose relative to scene root).
+    /// Populated by `compute_final_matrices` each frame.
+    pub bone_worlds: Vec<Matrix4<f32>>,
+    /// Per-mesh attachment info: `Some((bone_idx, relative_to_bone))` for meshes
+    /// that are descendants of bone nodes (e.g. gun, eyes, eyebrows).
+    /// `relative_to_bone` = `inverse(bone_bind_world) * mesh_bind_world`.
+    pub mesh_attachments: Vec<Option<(usize, Matrix4<f32>)>>,
+    /// Per-mesh animated attachment transforms computed from `bone_worlds` and
+    /// `mesh_attachments`.  Updated every frame in `compute_final_matrices`.
+    pub attachment_transforms: Vec<Matrix4<f32>>,
 }
 
 impl Skeleton {
@@ -39,6 +49,9 @@ impl Skeleton {
             root_ancestor_transform: Matrix4::identity(),
             mesh_count,
             final_matrices: vec![Matrix4::identity(); count],
+            bone_worlds: vec![Matrix4::identity(); count],
+            mesh_attachments: vec![None; mesh_count],
+            attachment_transforms: vec![Matrix4::identity(); mesh_count],
         }
     }
 
@@ -83,18 +96,24 @@ impl Skeleton {
         // Root bones additionally get the skeleton-root ancestor transform so
         // that the bone world is relative to the scene root (matching what
         // Assimp's offset matrix expects).
-        let mut world = vec![Matrix4::identity(); self.bones.len()];
         for &i in &order {
             let local = local_transforms[i];
-            world[i] = match self.bones[i].parent_index {
-                Some(parent) => world[parent] * local,
+            self.bone_worlds[i] = match self.bones[i].parent_index {
+                Some(parent) => self.bone_worlds[parent] * local,
                 None => self.root_ancestor_transform * local,
             };
         }
 
         // Multiply by per-mesh offset matrix: final = world * offset
         for i in 0..self.bones.len() {
-            self.final_matrices[i] = world[i] * self.bones[i].offset_matrices[mesh_index];
+            self.final_matrices[i] = self.bone_worlds[i] * self.bones[i].offset_matrices[mesh_index];
+        }
+
+        // Compute attachment transforms for non-skinned meshes attached to bones.
+        for (midx, attachment) in self.mesh_attachments.iter().enumerate() {
+            if let Some((bone_idx, relative)) = attachment {
+                self.attachment_transforms[midx] = self.bone_worlds[*bone_idx] * relative;
+            }
         }
 
         &self.final_matrices

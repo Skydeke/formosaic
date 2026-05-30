@@ -166,23 +166,26 @@ impl Mesh {
             vao.load_data_buffer(Rc::new(buf), &[Attribute::of(5, 4, DataType::Float, false)]);
         }
 
-        // location 3: bone indices (ivec4)
+        // location 3: bone indices — sent as float vec4 (not ivec4 / IPointer)
+        // because some Android GPU drivers silently mishandle VertexAttribIPointer
+        // with GL_INT, causing all skinned vertices to collapse to the origin.
+        // The shader casts each component to int with int() before indexing.
         if has_bones {
             let mut buf = DataBuffer::new(VboUsage::StaticDraw);
-            buf.allocate_int(flat_bone_indices.len() * 4);
-            let flat: Vec<i32> = flat_bone_indices
+            let flat: Vec<f32> = flat_bone_indices
                 .iter()
                 .flat_map(|arr| arr.iter())
-                .copied()
+                .map(|&i| i as f32)
                 .collect();
-            buf.store_int(0, &flat);
-            vao.load_data_buffer(Rc::new(buf), &[Attribute::of(3, 4, DataType::Int, false)]);
+            buf.allocate_float(flat.len());
+            buf.store_float(0, &flat);
+            vao.load_data_buffer(Rc::new(buf), &[Attribute::of(3, 4, DataType::Float, false)]);
         } else {
             let mut buf = DataBuffer::new(VboUsage::StaticDraw);
-            let zeros: Vec<i32> = vec![0; vert_count * 4];
-            buf.allocate_int(zeros.len());
-            buf.store_int(0, &zeros);
-            vao.load_data_buffer(Rc::new(buf), &[Attribute::of(3, 4, DataType::Int, false)]);
+            let zeros: Vec<f32> = vec![0.0f32; vert_count * 4];
+            buf.allocate_float(zeros.len());
+            buf.store_float(0, &zeros);
+            vao.load_data_buffer(Rc::new(buf), &[Attribute::of(3, 4, DataType::Float, false)]);
         }
 
         // location 4: bone weights (vec4)

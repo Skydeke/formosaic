@@ -9,7 +9,7 @@ fn material_defaults_are_stable() {
     assert_eq!(mat.ambient_color, Vector4::new(0.0, 0.0, 0.0, 1.0));
     assert_eq!(mat.metallic_factor, 0.0);
     assert_eq!(mat.roughness_factor, 0.5);
-    assert_eq!(mat.cull_backface, true);
+    assert_eq!(mat.cull_backface, false);
     assert_eq!(mat.alpha_mode, AlphaMode::Opaque);
     assert_eq!(mat.emissive_strength, 1.0);
 }

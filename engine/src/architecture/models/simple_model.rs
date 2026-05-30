@@ -164,7 +164,7 @@ impl SimpleModel {
             while i + 2 < pos.len() {
                 let local = Vector4::new(pos[i], pos[i + 1], pos[i + 2], 1.0);
 
-                let skinned = if !bones.is_empty() {
+                let skinned = if mesh.is_skinned() {
                     let mut blended = Vector4::new(0.0, 0.0, 0.0, 0.0);
                     let mut has_influence = false;
                     if let (Some(indices), Some(weights)) =
